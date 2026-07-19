@@ -110,6 +110,8 @@ class PinnedBopomofoTextService(TextService):
             return True
         if self._shift_punctuation(keyEvent) is not None:
             return True
+        if self._temporary_english_letter(keyEvent) is not None:
+            return True
         if keyEvent.keyCode == VK_SPACE:
             return self.isComposing()
         if keyEvent.keyCode == VK_DOWN:
@@ -143,6 +145,11 @@ class PinnedBopomofoTextService(TextService):
             self._emit_punctuation(punctuation)
             if keyEvent.keyCode == VK_OEM_QUOTE:
                 self.quote_open = not self.quote_open
+            return True
+
+        english_letter = self._temporary_english_letter(keyEvent)
+        if english_letter is not None:
+            self._emit_temporary_english(english_letter)
             return True
 
         if keyEvent.keyCode == VK_DOWN and not self.showCandidates:
@@ -331,6 +338,37 @@ class PinnedBopomofoTextService(TextService):
         if keyEvent.keyCode == VK_OEM_QUOTE:
             return "」" if self.quote_open else "「"
         return SHIFT_PUNCTUATION.get(keyEvent.keyCode)
+
+    def _temporary_english_letter(self, keyEvent) -> str | None:
+        """Return the uppercase ASCII letter produced by Shift+A-Z.
+
+        A standalone Shift press still toggles Chinese/English mode.  Holding
+        Shift while pressing a letter is a separate, protected interaction:
+        it emits one temporary English letter without changing modes.
+        """
+        if not any(
+            keyEvent.isKeyDown(code) for code in (VK_SHIFT, 0xA0, 0xA1)
+        ):
+            return None
+        if 0x41 <= keyEvent.keyCode <= 0x5A:
+            return chr(keyEvent.keyCode)
+        return None
+
+    def _emit_temporary_english(self, letter: str) -> None:
+        """Place a Shift-letter after pending Chinese text, never before it."""
+        if self.session.preedit:
+            # A partial syllable cannot become a Chinese character.  Discard
+            # only that unfinished reading, while preserving completed text.
+            self.session.clear()
+            self.replacement_index = None
+            self.reading_open = False
+        if self.segments:
+            self._commit_buffer(letter)
+            return
+        self._clear_all()
+        self.setCompositionString("")
+        self.setCompositionCursor(0)
+        self.setCommitString(letter)
 
     def _emit_punctuation(self, punctuation: str) -> None:
         if self.session.preedit:

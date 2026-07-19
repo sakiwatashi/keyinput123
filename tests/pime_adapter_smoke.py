@@ -131,6 +131,39 @@ def tap_shift(service, sequence: int) -> tuple[int, dict]:
     return sequence + 3, handled
 
 
+def hold_shift_letter(
+    service, character: str, sequence: int
+) -> tuple[int, dict]:
+    """Press Shift+letter and release both without triggering mode toggle."""
+    filter_key(service, "filterKeyDown", 0x10, sequence, shift=True)
+    key_code = ord(character.upper())
+    filtered = filter_key(
+        service, "filterKeyDown", key_code, sequence + 1, shift=True
+    )
+    assert filtered["return"] is True
+
+    key_states = [0] * 256
+    key_states[0x10] = 0x80
+    key_states[key_code] = 0x80
+    handled = service.handleRequest(
+        {
+            "method": "onKeyDown",
+            "seqNum": sequence + 2,
+            "charCode": ord(character.upper()),
+            "keyCode": key_code,
+            "repeatCount": 1,
+            "scanCode": 0,
+            "isExtended": False,
+            "keyStates": key_states,
+        }
+    )
+    assert handled["return"] is True
+    filter_key(service, "filterKeyUp", key_code, sequence + 3, shift=True)
+    released = filter_key(service, "filterKeyUp", 0x10, sequence + 4)
+    assert released["return"] is False
+    return sequence + 5, handled
+
+
 def type_readings(service, readings: list[str], sequence: int) -> int:
     for reading in readings:
         for key in keys_for_reading(reading):
@@ -295,6 +328,42 @@ def main() -> None:
         sequence, _ = tap_shift(mode_service, sequence + 2)
         assert not mode_service.english_mode
 
+        # CORE CONTRACT: holding Shift while pressing A-Z emits a temporary
+        # uppercase English letter and stays in Chinese mode.  This behavior
+        # is distinct from tapping Shift to toggle the persistent mode.
+        temporary_service = PinnedBopomofoTextService(DummyClient())
+        sequence, temporary_reply = hold_shift_letter(
+            temporary_service, "a", sequence + 1
+        )
+        assert temporary_reply["commitString"] == "A"
+        assert not temporary_service.english_mode
+
+        # Pending Chinese must be committed before the temporary English
+        # letter so applications can never place that letter at the left edge.
+        ordering_service = PinnedBopomofoTextService(DummyClient())
+        press(ordering_service, "s", sequence)  # ㄋ
+        press(ordering_service, "u", sequence + 1)  # ㄧ
+        press(ordering_service, "3", sequence + 2)  # ˇ -> 你
+        expected_chinese = ordering_service.compositionString
+        sequence, temporary_reply = hold_shift_letter(
+            ordering_service, "b", sequence + 3
+        )
+        assert temporary_reply["commitString"] == expected_chinese + "B"
+        assert temporary_reply["compositionString"] == ""
+        assert not ordering_service.english_mode
+
+        # An unfinished syllable is cancelled before the temporary letter;
+        # any completed Chinese to its left is still committed in order.
+        partial_temporary_service = PinnedBopomofoTextService(DummyClient())
+        press(partial_temporary_service, "s", sequence)  # unfinished ㄋ
+        sequence, temporary_reply = hold_shift_letter(
+            partial_temporary_service, "c", sequence + 1
+        )
+        assert temporary_reply["commitString"] == "C"
+        assert temporary_reply["compositionString"] == ""
+        assert partial_temporary_service.session.preedit == ""
+        assert not partial_temporary_service.english_mode
+
         # Shift also switches when an unfinished Bopomofo reading is present;
         # the partial reading is cancelled instead of blocking mode changes.
         partial_service = PinnedBopomofoTextService(DummyClient())
@@ -307,15 +376,17 @@ def main() -> None:
 
         # Completed Chinese text is committed inside onKeyUp before English
         # input is allowed through, so English cannot jump in front of it.
-        ordering_service = PinnedBopomofoTextService(DummyClient())
-        press(ordering_service, "s", sequence)  # ㄋ
-        press(ordering_service, "u", sequence + 1)  # ㄧ
-        press(ordering_service, "3", sequence + 2)  # ˇ -> 你
-        expected_chinese = ordering_service.compositionString
-        sequence, toggle_reply = tap_shift(ordering_service, sequence + 3)
+        toggle_ordering_service = PinnedBopomofoTextService(DummyClient())
+        press(toggle_ordering_service, "s", sequence)  # ㄋ
+        press(toggle_ordering_service, "u", sequence + 1)  # ㄧ
+        press(toggle_ordering_service, "3", sequence + 2)  # ˇ -> 你
+        expected_chinese = toggle_ordering_service.compositionString
+        sequence, toggle_reply = tap_shift(
+            toggle_ordering_service, sequence + 3
+        )
         assert toggle_reply["commitString"] == expected_chinese
         assert toggle_reply["compositionString"] == ""
-        assert ordering_service.english_mode
+        assert toggle_ordering_service.english_mode
 
         # The candidate menu starts compact.  Moving down past candidate five
         # expands the practical (top-20) list instead of wrapping around.
