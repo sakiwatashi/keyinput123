@@ -26,7 +26,7 @@ function Get-VerifiedFile(
     [string]$LocalCandidate,
     [string]$Uri,
     [string]$Destination,
-    [string]$ExpectedSha256
+    [string[]]$ExpectedSha256
 ) {
     if (Test-Path -LiteralPath $LocalCandidate) {
         Copy-Item -LiteralPath $LocalCandidate -Destination $Destination -Force
@@ -35,7 +35,7 @@ function Get-VerifiedFile(
         Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
     }
     $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
-    if ($actual -ne $ExpectedSha256) {
+    if ($ExpectedSha256 -notcontains $actual) {
         throw "License checksum mismatch for $Destination (got $actual)."
     }
 }
@@ -51,12 +51,18 @@ Get-VerifiedFile `
     (Join-Path $workspaceRoot "tmp\PIME-upstream\LICENSE.txt") `
     "https://raw.githubusercontent.com/EasyIME/PIME/571759f471c93e288682305148df751a12f5415e/LICENSE.txt" `
     $pimeLicense `
-    "8383DBC7C8938F879BDBFBB6366DF57B3E2B9612B631714D14F0D5FA7F158A8F"
+    @(
+        "8383DBC7C8938F879BDBFBB6366DF57B3E2B9612B631714D14F0D5FA7F158A8F",
+        "BA6EA5AFA38BA866AB2CD0D27119B9421EFEC40A2132C4EB98F8C70C81660744"
+    )
 Get-VerifiedFile `
     (Join-Path $workspaceRoot "tmp\libchewing-upstream\COPYING") `
     "https://raw.githubusercontent.com/chewing/libchewing/3c4a93aa03d574c7f011ff84e8a2437c2f79b2cf/COPYING" `
     $chewingLicense `
-    "1E7E6BAE5A5BDE32F1AE5A7C37A082D1AB03CF89354F7F936AC40BE9E39A6531"
+    @(
+        "1E7E6BAE5A5BDE32F1AE5A7C37A082D1AB03CF89354F7F936AC40BE9E39A6531",
+        "DC626520DCD53A22F727AF3EE42C770E56C97A64FE3ADB063799D8AB032FE551"
+    )
 
 if (-not $MakensisPath) {
     $candidates = @(
