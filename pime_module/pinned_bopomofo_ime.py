@@ -44,7 +44,10 @@ SHIFT_PUNCTUATION = {
 VK_OEM_QUOTE = 0xDE
 COMPACT_CANDIDATE_COUNT = 5
 MAX_PHRASE_CHOICES = 12
-NUMPAD_DIGITS = {key_code: str(key_code - 0x60) for key_code in range(0x60, 0x6A)}
+NUMPAD_TEXT = {
+    **{key_code: str(key_code - 0x60) for key_code in range(0x60, 0x6A)},
+    0x6E: ".",  # VK_DECIMAL
+}
 
 
 @dataclass
@@ -144,7 +147,7 @@ class PinnedBopomofoTextService(TextService):
             return self.showCandidates and keyEvent.keyCode == VK_PRIOR
         if self.english_mode:
             return False
-        if self._numpad_digit(keyEvent) is not None:
+        if self._numpad_text(keyEvent) is not None:
             return True
         if self.showCandidates and self._candidate_number(keyEvent) is not None:
             return True
@@ -167,9 +170,9 @@ class PinnedBopomofoTextService(TextService):
     def onKeyDown(self, keyEvent):
         if self.english_mode:
             return False
-        numpad_digit = self._numpad_digit(keyEvent)
-        if numpad_digit is not None:
-            self._emit_direct_text(numpad_digit)
+        numpad_text = self._numpad_text(keyEvent)
+        if numpad_text is not None:
+            self._emit_direct_text(numpad_text)
             return True
         if (
             self.showCandidates
@@ -374,7 +377,7 @@ class PinnedBopomofoTextService(TextService):
 
     def _candidate_number(self, keyEvent) -> int | None:
         # The right-hand numeric keypad is text input, never a candidate key.
-        if keyEvent.keyCode in NUMPAD_DIGITS:
+        if keyEvent.keyCode in NUMPAD_TEXT:
             return None
         if 0x31 <= keyEvent.keyCode <= 0x35:
             return keyEvent.keyCode - 0x31
@@ -383,8 +386,10 @@ class PinnedBopomofoTextService(TextService):
         return None
 
     @staticmethod
-    def _numpad_digit(keyEvent) -> str | None:
-        return NUMPAD_DIGITS.get(keyEvent.keyCode)
+    def _numpad_text(keyEvent) -> str | None:
+        # Use the physical virtual-key code so NumPad decimal remains a dot
+        # even when PIME supplies no charCode or the Bopomofo keymap sees it.
+        return NUMPAD_TEXT.get(keyEvent.keyCode)
 
     def _shift_punctuation(self, keyEvent) -> str | None:
         if not (

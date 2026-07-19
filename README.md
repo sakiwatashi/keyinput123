@@ -36,7 +36,7 @@ Git Bash 使用者可把最後一行改為 `./install.sh`。
 一般使用者只需要執行發佈資料夾中的：
 
 ```text
-Smart-Priority-Bopomofo-Setup-0.4.1.exe
+Smart-Priority-Bopomofo-Setup-0.4.2.exe
 ```
 
 從 GitHub clone 原始碼後，可在 PowerShell 執行一鍵安裝：
@@ -116,4 +116,4 @@ python -m unittest discover -s tests -v
 候選排序固定先保留使用者明確選擇；內建來源先比較完整涵蓋的音節數，避免
 「對話框」被較短的「畫框」覆蓋；涵蓋相同時才依教育部台灣字詞頻資料、
 內建詞庫的順序決定。
-右側數字鍵盤永遠輸出數字；Shift+英文字母或符號會取代當前未完成音節。
+右側數字鍵盤的 0–9 與小數點永遠輸出數字或 `.`；Shift+英文字母或符號會取代當前未完成音節。

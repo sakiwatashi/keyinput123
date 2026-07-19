@@ -89,7 +89,7 @@ if (-not $MakensisPath -or -not (Test-Path -LiteralPath $MakensisPath)) {
 & $MakensisPath "/INPUTCHARSET" "UTF8" (Join-Path $projectRoot "installer\SmartPriorityBopomofo.nsi")
 if ($LASTEXITCODE -ne 0) { throw "NSIS build failed with exit code $LASTEXITCODE." }
 
-$artifact = Join-Path $releaseRoot "Smart-Priority-Bopomofo-Setup-0.4.1.exe"
+$artifact = Join-Path $releaseRoot "Smart-Priority-Bopomofo-Setup-0.4.2.exe"
 if (-not (Test-Path -LiteralPath $artifact)) {
     throw "The installer artifact was not created."
 }

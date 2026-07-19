@@ -109,6 +109,24 @@ def numpad_key(service, digit: int, sequence: int) -> dict:
     return reply
 
 
+def numpad_decimal_key(service, sequence: int) -> dict:
+    reply = service.handleRequest(
+        {
+            "method": "onKeyDown",
+            "seqNum": sequence,
+            "charCode": 0,
+            "keyCode": 0x6E,  # VK_DECIMAL
+            "repeatCount": 1,
+            "scanCode": 0,
+            "isExtended": False,
+            "keyStates": [0] * 256,
+        }
+    )
+    assert reply["success"]
+    assert reply["return"] is True
+    return reply
+
+
 def filter_key(service, method: str, key_code: int, sequence: int, shift=False):
     key_states = [0] * 256
     if shift:
@@ -580,6 +598,31 @@ def main() -> None:
         numpad_reply = numpad_key(numpad_composition, 1, sequence + 1)
         sequence += 2
         assert numpad_reply["commitString"] == "字1"
+
+        # CORE CONTRACT: the physical NumPad decimal key is direct text just
+        # like NumPad 0-9. It must never fall through to the Bopomofo keymap,
+        # even when charCode is absent or a candidate menu is open.
+        decimal_service = PinnedBopomofoTextService(DummyClient())
+        decimal_reply = numpad_decimal_key(decimal_service, sequence)
+        sequence += 1
+        assert decimal_reply["commitString"] == "."
+
+        partial_decimal_service = PinnedBopomofoTextService(DummyClient())
+        press(partial_decimal_service, "a", sequence)  # incomplete ㄇ
+        decimal_reply = numpad_decimal_key(
+            partial_decimal_service, sequence + 1
+        )
+        sequence += 2
+        assert decimal_reply["commitString"] == "."
+        assert partial_decimal_service.session.preedit == ""
+
+        decimal_composition = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(decimal_composition, ["ㄗˋ"], sequence)
+        special_key(decimal_composition, 0x28, sequence)  # candidate menu
+        decimal_reply = numpad_decimal_key(decimal_composition, sequence + 1)
+        sequence += 2
+        assert decimal_reply["commitString"] == "字."
+        assert not decimal_composition.showCandidates
 
         insertion_direct = PinnedBopomofoTextService(DummyClient())
         sequence = type_readings(

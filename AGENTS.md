@@ -44,7 +44,8 @@ When PIME is installed, also run:
 - Activation, a Windows keyboard-close status, and forced focus termination
   restore the profile to keyboard-open Bopomofo mode. Password fields and apps
   that explicitly disable IMEs remain under Windows control.
-- Numpad 0-9 always emits digits and never Bopomofo or candidate numbers.
+- Numpad 0-9 and VK_DECIMAL always emit digits/dot and never Bopomofo or
+  candidate numbers.
   Shift+A-Z and Shift punctuation replace only an unfinished active syllable,
   preserve completed Chinese, and emit at the active caret.
 - Feedback collection records only explicit conversion corrections. Never add
