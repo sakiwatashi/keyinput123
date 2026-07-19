@@ -90,6 +90,25 @@ def shifted_key(service, key_code: int, sequence: int) -> dict:
     return reply
 
 
+def numpad_key(service, digit: int, sequence: int) -> dict:
+    key_code = 0x60 + digit
+    reply = service.handleRequest(
+        {
+            "method": "onKeyDown",
+            "seqNum": sequence,
+            "charCode": ord(str(digit)),
+            "keyCode": key_code,
+            "repeatCount": 1,
+            "scanCode": 0,
+            "isExtended": False,
+            "keyStates": [0] * 256,
+        }
+    )
+    assert reply["success"]
+    assert reply["return"] is True
+    return reply
+
+
 def filter_key(service, method: str, key_code: int, sequence: int, shift=False):
     key_states = [0] * 256
     if shift:
@@ -172,6 +191,19 @@ def type_readings(service, readings: list[str], sequence: int) -> int:
     return sequence
 
 
+def force_composition_text(service, text: str) -> None:
+    """Put a known wrong homophone into completed segments for edit tests."""
+    assert len(service.segments) == len(text)
+    for segment, character in zip(service.segments, text):
+        segment.candidates = list(
+            dict.fromkeys([character] + segment.candidates)
+        )
+        segment.selected = 0
+        segment.locked = True
+    service.focus_index = len(service.segments) - 1
+    service._render_buffer()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as appdata:
         os.environ["APPDATA"] = appdata
@@ -209,7 +241,15 @@ def main() -> None:
         assert service.showCandidates
         original_reading = service.segments[0].reading
         second_candidate = service.segments[0].candidates[1]
-        special_key(service, 0x32, 10)  # physical 2, even when charCode is absent
+        single_choice_index = next(
+            index
+            for index, choice in enumerate(service.candidate_choices)
+            if choice.width == 1 and choice.text == second_candidate
+        )
+        assert single_choice_index < 5
+        special_key(
+            service, 0x31 + single_choice_index, 10
+        )  # physical number, even when charCode is absent
         assert not service.showCandidates
         assert service.segments[0].selected == 0
         assert service.segments[0].candidates[0] == second_candidate
@@ -265,12 +305,15 @@ def main() -> None:
         assert learned_service.compositionString == second_candidate
 
         # A real forced termination still clears everything.
-        learned_service.handleRequest(
+        learned_service.english_mode = True
+        terminated_reply = learned_service.handleRequest(
             {"method": "onCompositionTerminated", "seqNum": 20, "forced": True}
         )
         assert learned_service.session.preedit == ""
         assert learned_service.compositionString == ""
         assert not learned_service.provisional
+        assert not learned_service.english_mode
+        assert terminated_reply["openKeyboard"] is True
 
         # The full tsi.dat phrase index ranks common 2/3-character words while
         # the UI continues to hold independently editable character segments.
@@ -279,13 +322,137 @@ def main() -> None:
             (["ㄗˋ", "ㄉㄧㄢˇ"], "字典"),
             (["ㄐㄧㄚˇ", "ㄕㄜˋ"], "假設"),
             (["ㄒㄧㄝˇ", "ㄔㄥˊ", "ㄕˋ"], "寫程式"),
+            (["ㄉㄨㄟˋ", "ㄏㄨㄚˋ", "ㄎㄨㄤˉ"], "對話框"),
         )
         sequence = 21
         for readings, expected in phrase_examples:
             phrase_service = PinnedBopomofoTextService(DummyClient())
             sequence = type_readings(phrase_service, readings, sequence)
-            assert phrase_service.compositionString == expected
+            assert phrase_service.compositionString == expected, (
+                readings,
+                expected,
+                phrase_service.compositionString,
+            )
             assert len(phrase_service.segments) == len(expected)
+
+        # CORE CONTRACT: phrase coverage is compared before source weight.
+        # The shorter official word 畫框 must not overwrite libchewing's
+        # correct three-syllable conversion 對話框.
+        dialog_service = PinnedBopomofoTextService(DummyClient())
+        dialog_readings = ["ㄉㄨㄟˋ", "ㄏㄨㄚˋ", "ㄎㄨㄤˉ"]
+        sequence = type_readings(dialog_service, dialog_readings, sequence)
+        shorter_matches = dialog_service.session.frequent_phrase_candidates(
+            [segment.candidates for segment in dialog_service.segments[-2:]]
+        )
+        assert shorter_matches[0] == "畫框"
+        assert dialog_service.session.best_phrase(dialog_readings) == "對話框"
+        assert dialog_service.compositionString == "對話框"
+
+        # The bundled Rime Essay derivative contributes over 100k offline
+        # Taiwan-Traditional phrases and is filtered through exact-tone single
+        # character candidates before it can affect the composition.
+        expanded_service = PinnedBopomofoTextService(DummyClient())
+        expanded_readings = ["ㄖㄣˊ", "ㄍㄨㄥˉ", "ㄓˋ", "ㄏㄨㄟˋ"]
+        sequence = type_readings(expanded_service, expanded_readings, sequence)
+        frequency_matches = expanded_service.session.frequent_phrase_candidates(
+            [segment.candidates for segment in expanded_service.segments]
+        )
+        assert frequency_matches[0] == "人工智慧"
+        assert expanded_service.compositionString == "人工智慧"
+
+        # Automatic acceptance/commit must not reinforce itself. Only an
+        # explicit candidate choice is allowed to enter the personal layer.
+        automatic_service = PinnedBopomofoTextService(DummyClient())
+        automatic_readings = ["ㄖㄨˊ", "ㄍㄨㄛˇ"]
+        assert automatic_service.phrase_store.exact(automatic_readings) == ""
+        sequence = type_readings(
+            automatic_service, automatic_readings, sequence
+        )
+        special_key(automatic_service, 0x0D, sequence)
+        sequence += 1
+        assert automatic_service.phrase_store.exact(automatic_readings) == ""
+
+        # CORE CONTRACT: candidate editing offers whole words, not only the
+        # single character to the caret's right. Selecting a word replaces all
+        # of its syllable segments together and records it as a personal word.
+        optimize_service = PinnedBopomofoTextService(DummyClient())
+        optimize_readings = ["ㄧㄡˉ", "ㄏㄨㄚˋ"]
+        sequence = type_readings(optimize_service, optimize_readings, sequence)
+        assert optimize_service.compositionString == "優化"
+        force_composition_text(optimize_service, "優話")
+        special_key(optimize_service, 0x28, sequence)  # VK_DOWN
+        sequence += 1
+        assert optimize_service.candidateList[0] == "優化"
+        assert optimize_service.candidate_choices[0].width == 2
+        special_key(optimize_service, 0x31, sequence)  # choose whole word
+        sequence += 1
+        assert optimize_service.compositionString == "優化"
+        assert [segment.text for segment in optimize_service.segments] == list("優化")
+        feedback = optimize_service.feedback_store.entries()
+        assert any(
+            entry["converted"] == "優話" and entry["expected"] == "優化"
+            for entry in feedback
+        )
+
+        # Protected defaults distinguish an isolated character from a word:
+        # ㄗˋ starts as 字, then contextual phrase ranking may form 自己/自我.
+        zi_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(zi_service, ["ㄗˋ"], sequence)
+        assert zi_service.compositionString == "字"
+        self_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(self_service, ["ㄗˋ", "ㄐㄧˇ"], sequence)
+        assert self_service.compositionString == "自己"
+
+        # Once a high-confidence word is resolved, later syllables cannot
+        # reach backwards and alter it. The protected 優先級 spelling also
+        # beats the homophonous 優先及.
+        stable_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(stable_service, optimize_readings, sequence)
+        assert stable_service.compositionString == "優化"
+        sequence = type_readings(
+            stable_service, ["ㄧˊ", "ㄒㄧㄚˋ"], sequence
+        )
+        assert stable_service.compositionString == "優化一下"
+
+        priority_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            priority_service,
+            ["ㄧㄡˉ", "ㄒㄧㄢˉ", "ㄐㄧˊ"],
+            sequence,
+        )
+        assert priority_service.compositionString == "優先級"
+
+        # Explicit personal learning is stronger than every bundled default,
+        # even when the selected phrase is unusual.
+        personal_priority = PinnedBopomofoTextService(DummyClient())
+        personal_priority.phrase_store.learn(optimize_readings, "優話")
+        sequence = type_readings(personal_priority, optimize_readings, sequence)
+        assert personal_priority.compositionString == "優話"
+
+        program_service = PinnedBopomofoTextService(DummyClient())
+        program_readings = ["ㄒㄧㄝˇ", "ㄔㄥˊ", "ㄕˋ"]
+        sequence = type_readings(program_service, program_readings, sequence)
+        force_composition_text(program_service, "寫城市")
+        special_key(program_service, 0x28, sequence)
+        sequence += 1
+        assert program_service.candidateList[0] == "寫程式"
+        assert program_service.candidate_choices[0].width == 3
+        special_key(program_service, 0x31, sequence)
+        sequence += 1
+        assert program_service.compositionString == "寫程式"
+
+        four_word_service = PinnedBopomofoTextService(DummyClient())
+        four_readings = ["ㄧˊ", "ㄆㄧㄢˋ", "ㄕㄨˋ", "ㄧㄝˋ"]
+        four_word_service.phrase_store.learn(four_readings, "一片樹葉")
+        sequence = type_readings(four_word_service, four_readings, sequence)
+        force_composition_text(four_word_service, "姨騙數夜")
+        special_key(four_word_service, 0x28, sequence)
+        sequence += 1
+        assert four_word_service.candidateList[0] == "一片樹葉"
+        assert four_word_service.candidate_choices[0].width == 4
+        special_key(four_word_service, 0x31, sequence)
+        sequence += 1
+        assert four_word_service.compositionString == "一片樹葉"
 
         # Personal phrases extend the built-in index and take precedence on
         # the next service instance.
@@ -316,6 +483,17 @@ def main() -> None:
         # A short standalone Shift press toggles Chinese/English.  Printable
         # keys pass through untouched in English mode, and Shift toggles back.
         mode_service = PinnedBopomofoTextService(DummyClient())
+        activation_reply = mode_service.handleRequest(
+            {
+                "method": "onActivate",
+                "seqNum": sequence,
+                "isKeyboardOpen": False,
+            }
+        )
+        sequence += 1
+        assert activation_reply["openKeyboard"] is True
+        assert mode_service.keyboardOpen
+        assert not mode_service.english_mode
         sequence, _ = tap_shift(mode_service, sequence + 1)
         assert mode_service.english_mode
         english_a = key_message("a", sequence)
@@ -326,6 +504,21 @@ def main() -> None:
         key_up_a["method"] = "filterKeyUp"
         mode_service.handleRequest(key_up_a)
         sequence, _ = tap_shift(mode_service, sequence + 2)
+        assert not mode_service.english_mode
+
+        # Windows can close the keyboard compartment when focus changes.
+        # This profile reopens it and resets its field-local English toggle.
+        mode_service.english_mode = True
+        status_reply = mode_service.handleRequest(
+            {
+                "method": "onKeyboardStatusChanged",
+                "seqNum": sequence,
+                "opened": False,
+            }
+        )
+        sequence += 1
+        assert status_reply["openKeyboard"] is True
+        assert mode_service.keyboardOpen
         assert not mode_service.english_mode
 
         # CORE CONTRACT: holding Shift while pressing A-Z emits a temporary
@@ -363,6 +556,41 @@ def main() -> None:
         assert temporary_reply["compositionString"] == ""
         assert partial_temporary_service.session.preedit == ""
         assert not partial_temporary_service.english_mode
+
+        # Shift punctuation follows the same replacement rule as Shift+A-Z.
+        partial_symbol_service = PinnedBopomofoTextService(DummyClient())
+        press(partial_symbol_service, "a", sequence)  # incomplete ㄇ
+        symbol_reply = shifted_key(partial_symbol_service, 0xBF, sequence + 1)
+        sequence += 2
+        assert symbol_reply["commitString"] == "？"
+        assert partial_symbol_service.session.preedit == ""
+
+        # Numpad is always numeric text in Chinese mode. It cannot produce a
+        # Bopomofo symbol or select candidate 1, and replaces a partial sound.
+        numpad_service = PinnedBopomofoTextService(DummyClient())
+        press(numpad_service, "a", sequence)  # incomplete ㄇ
+        numpad_reply = numpad_key(numpad_service, 7, sequence + 1)
+        sequence += 2
+        assert numpad_reply["commitString"] == "7"
+        assert numpad_service.session.preedit == ""
+
+        numpad_composition = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(numpad_composition, ["ㄗˋ"], sequence)
+        special_key(numpad_composition, 0x28, sequence)  # candidate menu
+        numpad_reply = numpad_key(numpad_composition, 1, sequence + 1)
+        sequence += 2
+        assert numpad_reply["commitString"] == "字1"
+
+        insertion_direct = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            insertion_direct, ["ㄨㄣˊ", "ㄗˋ"], sequence
+        )
+        special_key(insertion_direct, 0x08, sequence)  # remove 字, leave gap
+        press(insertion_direct, "a", sequence + 1)  # incomplete ㄇ at gap
+        sequence, direct_reply = hold_shift_letter(
+            insertion_direct, "d", sequence + 2
+        )
+        assert direct_reply["commitString"] == "文D"
 
         # Shift also switches when an unfinished Bopomofo reading is present;
         # the partial reading is cancelled instead of blocking mode changes.

@@ -13,6 +13,20 @@ class CommonUsageTests(unittest.TestCase):
             prioritize_common_character("ㄅㄨˋ", ["部", "步", "不"]),
         )
 
+    def test_zi_defaults_to_character_but_context_can_select_self(self) -> None:
+        self.assertEqual(
+            ["字", "自", "漬"],
+            prioritize_common_character("ㄗˋ", ["自", "漬", "字"]),
+        )
+        self.assertEqual(
+            "自己",
+            apply_common_usage_overrides(["ㄗˋ", "ㄐㄧˇ"], "字己"),
+        )
+        self.assertEqual(
+            "自我",
+            apply_common_usage_overrides(["ㄗˋ", "ㄨㄛˇ"], "字我"),
+        )
+
     def test_bu_phrases_are_forced_to_common_usage(self) -> None:
         self.assertEqual(
             "我不要",
@@ -23,6 +37,20 @@ class CommonUsageTests(unittest.TestCase):
         self.assertEqual(
             "不是",
             apply_common_usage_overrides(["ㄅㄨˋ", "ㄕˋ"], "部市"),
+        )
+
+    def test_you_hua_prefers_the_common_word_optimize(self) -> None:
+        self.assertEqual(
+            "優化",
+            apply_common_usage_overrides(["ㄧㄡˉ", "ㄏㄨㄚˋ"], "優話"),
+        )
+
+    def test_you_xian_ji_prefers_level_not_conjunction(self) -> None:
+        self.assertEqual(
+            "優先級",
+            apply_common_usage_overrides(
+                ["ㄧㄡˉ", "ㄒㄧㄢˉ", "ㄐㄧˊ"], "優先及"
+            ),
         )
 
     def test_zai_rules_distinguish_unambiguous_traditional_usage(self) -> None:

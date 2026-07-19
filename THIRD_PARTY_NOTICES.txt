@@ -1,4 +1,4 @@
-智慧優先注音 0.2.0 — 第三方軟體聲明
+智慧優先注音 0.4.1 — 第三方軟體聲明
 ========================================
 
 本安裝包包含或搭配下列開放原始碼元件：
@@ -18,10 +18,30 @@
    詞庫資料識別版本：2025.8.19
    詞庫資料著作權：Copyright 2025 libchewing Core Team
 
+3. Rime Essay（八股文）高頻詞彙與語言模型
+   專案：https://github.com/rime/rime-essay
+   原始碼版本：e9b1a374a6ea015fca5bdd04318924b4483ac35a
+   授權：GNU Lesser General Public License 3.0
+   本專案從 essay.txt 選取權重 500 以上的 2–12 字純中文詞，使用
+   OpenCC s2twp 轉為臺灣正體並建立離線索引；轉換後資料仍依
+   LGPL-3.0 授權。索引包含 113,738 條高頻詞。
+   原作者與資料來源包括 Rime Developers、Chewing、OpenCC、
+   Android Pinyin IME 與萌典；完整名單見上游 AUTHORS。
+
+4. 教育部「85年常用語詞調查報告之各項統計表」
+   提供機關：教育部終身教育司
+   資料集：https://data.gov.tw/dataset/45518
+   授權：政府資料開放授權條款－第1版
+   本專案使用字頻總表與詞頻總表建立台灣預設候選排序索引，包含
+   4,610 個字頻與 43,632 個二至十二字詞頻。完整顯名聲明見
+   MOE-OPEN-DATA-NOTICE.txt。
+
 完整授權條款隨安裝程式放在安裝目錄：
 
 - PIME-LICENSE.txt
 - libchewing-COPYING.txt
+- rime-essay-LICENSE.txt
+- MOE-OPEN-DATA-NOTICE.txt
 
 個人學習資料位於 %APPDATA%\PinnedBopomofo。解除安裝預設保留該資料，方便
 重新安裝或自行備份。

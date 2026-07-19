@@ -39,8 +39,33 @@ class CandidateSession:
         converter = getattr(self.provider, "best_phrase", None)
         return converter(readings) if converter is not None else ""
 
+    def phrase_candidates(self, readings: list[str]) -> list[str]:
+        converter = getattr(self.provider, "phrase_candidates", None)
+        if converter is None:
+            best = self.best_phrase(readings)
+            return [best] if best else []
+        return list(dict.fromkeys(converter(readings)))[: self.max_candidates]
+
+    def dictionary_phrase_candidates(self, readings: list[str]) -> list[str]:
+        """Return only engine phrases that cover the requested span exactly."""
+        converter = getattr(self.provider, "dictionary_phrase_candidates", None)
+        if converter is None:
+            return []
+        return list(dict.fromkeys(converter(readings)))[: self.max_candidates]
+
+    def frequent_phrase_candidates(
+        self, candidate_columns: list[list[str]]
+    ) -> list[str]:
+        converter = getattr(self.provider, "frequent_phrase_candidates", None)
+        if converter is None:
+            return []
+        return list(dict.fromkeys(converter(candidate_columns)))[
+            : self.max_candidates
+        ]
+
     def _prioritize(self, reading: str, engine_candidates: list[str]) -> list[str]:
         pinned = self.pins.phrases_for(reading)
+        # Explicit user choices always outrank every bundled language model.
         return list(dict.fromkeys(pinned + engine_candidates))[: self.max_candidates]
 
     def _validate(self, reading: str) -> bool:

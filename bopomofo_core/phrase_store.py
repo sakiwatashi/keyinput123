@@ -64,3 +64,9 @@ class PhraseStore:
             if phrase is not None:
                 return width, phrase
         return 0, ""
+
+    def exact(self, readings: list[str]) -> str:
+        """Return the personal phrase for exactly this reading span."""
+        if not MIN_PHRASE_LENGTH <= len(readings) <= MAX_PHRASE_LENGTH:
+            return ""
+        return self._entries.get(self._key(readings), "")

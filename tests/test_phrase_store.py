@@ -15,6 +15,8 @@ class PhraseStoreTests(unittest.TestCase):
             loaded = PhraseStore(path)
             self.assertEqual((3, "寫程式"), loaded.best_suffix(readings))
             self.assertEqual((2, "程式"), loaded.best_suffix(readings[1:]))
+            self.assertEqual("寫程式", loaded.exact(readings))
+            self.assertEqual("", loaded.exact(readings[:1]))
 
     def test_longest_matching_suffix_wins(self) -> None:
         store = PhraseStore()

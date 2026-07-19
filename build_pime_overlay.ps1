@@ -23,9 +23,17 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\input_methods_init.p
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\__init__.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\ime.json") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\pinned_bopomofo_ime.py") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "feedback-report.ps1") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moduleRoot -Force
 
 Get-ChildItem -LiteralPath (Join-Path $projectRoot "bopomofo_core") -Filter "*.py" -File |
     Copy-Item -Destination $coreDest -Force
+$coreData = Join-Path $projectRoot "bopomofo_core\data"
+if (Test-Path -LiteralPath $coreData) {
+    Copy-Item -LiteralPath $coreData -Destination $coreDest -Recurse -Force
+}
 
 $runtimeChewing = Join-Path $projectRoot "pime_runtime\libchewing"
 Copy-Item -LiteralPath (Join-Path $runtimeChewing "__init__.py") -Destination $chewingDest -Force

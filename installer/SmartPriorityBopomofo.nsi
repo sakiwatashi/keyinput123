@@ -3,7 +3,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 !define PRODUCT_NAME "智慧優先注音"
-!define PRODUCT_VERSION "0.2.0"
+!define PRODUCT_VERSION "0.4.1"
 !define PRODUCT_PUBLISHER "Smart Priority Bopomofo contributors"
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
 
@@ -14,7 +14,7 @@ InstallDirRegKey HKLM "${PRODUCT_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.2.0.0"
+VIProductVersion "0.4.1.0"
 VIAddVersionKey /LANG=1028 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1028 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1028 "FileDescription" "${PRODUCT_NAME} 安裝程式"
@@ -48,6 +48,8 @@ Section "安裝智慧優先注音" SEC_MAIN
     File "..\release-staging\THIRD_PARTY_NOTICES.txt"
     File "..\release-staging\PIME-LICENSE.txt"
     File "..\release-staging\libchewing-COPYING.txt"
+    File "..\release-staging\rime-essay-LICENSE.txt"
+    File "..\release-staging\MOE-OPEN-DATA-NOTICE.txt"
 
     InitPluginsDir
     SetOutPath "$PLUGINSDIR\payload"

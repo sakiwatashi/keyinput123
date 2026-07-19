@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $profileGuid = "{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $textServiceGuid = "{35F67E9D-A54D-4177-9697-8B0AB71A9E04}"
@@ -70,6 +70,17 @@ try {
     }
     if ($changed) {
         Set-WinUserLanguageList -LanguageList $languages -Force
+    }
+
+    $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+    $shortcutRoot = Join-Path $programs "智慧優先注音"
+    $shortcutPath = Join-Path $shortcutRoot "轉換錯誤回報工具.lnk"
+    if (Test-Path -LiteralPath $shortcutPath) {
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
+    if ((Test-Path -LiteralPath $shortcutRoot) -and
+        -not (Get-ChildItem -LiteralPath $shortcutRoot -Force)) {
+        Remove-Item -LiteralPath $shortcutRoot -Force
     }
 
     # Remove only this language profile. PIME and every other PIME input

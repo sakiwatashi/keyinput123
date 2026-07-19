@@ -9,6 +9,8 @@ $stagingRoot = Join-Path $projectRoot "release-staging"
 $noticeSource = Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt"
 $pimeLicense = Join-Path $stagingRoot "PIME-LICENSE.txt"
 $chewingLicense = Join-Path $stagingRoot "libchewing-COPYING.txt"
+$rimeEssayLicense = Join-Path $stagingRoot "rime-essay-LICENSE.txt"
+$moeDataNotice = Join-Path $stagingRoot "MOE-OPEN-DATA-NOTICE.txt"
 
 function Reset-ProjectDirectory([string]$Path) {
     $resolvedProject = [IO.Path]::GetFullPath($projectRoot).TrimEnd("\")
@@ -45,6 +47,7 @@ Reset-ProjectDirectory $stagingRoot
 
 & (Join-Path $projectRoot "build_pime_overlay.ps1") | Out-Null
 Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $stagingRoot "THIRD_PARTY_NOTICES.txt") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moeDataNotice -Force
 
 $workspaceRoot = Split-Path -Parent $projectRoot
 Get-VerifiedFile `
@@ -63,6 +66,14 @@ Get-VerifiedFile `
         "1E7E6BAE5A5BDE32F1AE5A7C37A082D1AB03CF89354F7F936AC40BE9E39A6531",
         "DC626520DCD53A22F727AF3EE42C770E56C97A64FE3ADB063799D8AB032FE551"
     )
+Get-VerifiedFile `
+    (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") `
+    "https://raw.githubusercontent.com/rime/rime-essay/e9b1a374a6ea015fca5bdd04318924b4483ac35a/LICENSE" `
+    $rimeEssayLicense `
+    @(
+        "EA7D049C7705DC13AFC202DD18E1827F3484F8212FD3FA7B82FC4A0C363432C9",
+        "DA7EABB7BAFDF7D3AE5E9F223AA5BDC1EECE45AC569DC21B3B037520B4464768"
+    )
 
 if (-not $MakensisPath) {
     $candidates = @(
@@ -78,7 +89,7 @@ if (-not $MakensisPath -or -not (Test-Path -LiteralPath $MakensisPath)) {
 & $MakensisPath "/INPUTCHARSET" "UTF8" (Join-Path $projectRoot "installer\SmartPriorityBopomofo.nsi")
 if ($LASTEXITCODE -ne 0) { throw "NSIS build failed with exit code $LASTEXITCODE." }
 
-$artifact = Join-Path $releaseRoot "Smart-Priority-Bopomofo-Setup-0.2.0.exe"
+$artifact = Join-Path $releaseRoot "Smart-Priority-Bopomofo-Setup-0.4.1.exe"
 if (-not (Test-Path -LiteralPath $artifact)) {
     throw "The installer artifact was not created."
 }

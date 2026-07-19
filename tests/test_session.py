@@ -74,12 +74,56 @@ class CandidateSessionTests(unittest.TestCase):
             def best_phrase(self, readings):
                 return "樹葉" if readings == ["ㄕㄨˋ", "ㄧㄝˋ"] else ""
 
+            def phrase_candidates(self, readings):
+                return ["樹葉", "樹液", "數夜"]
+
+            def dictionary_phrase_candidates(self, readings):
+                return ["樹葉", "樹液"]
+
+            def frequent_phrase_candidates(self, candidate_columns):
+                return ["樹葉", "數夜"]
+
         session = CandidateSession(ContextualProvider())
         self.assertEqual("樹葉", session.best_phrase(["ㄕㄨˋ", "ㄧㄝˋ"]))
+        self.assertEqual(
+            ["樹葉", "樹液", "數夜"],
+            session.phrase_candidates(["ㄕㄨˋ", "ㄧㄝˋ"]),
+        )
+        self.assertEqual(
+            ["樹葉", "樹液"],
+            session.dictionary_phrase_candidates(["ㄕㄨˋ", "ㄧㄝˋ"]),
+        )
+        self.assertEqual(
+            ["樹葉", "數夜"],
+            session.frequent_phrase_candidates([["樹", "數"], ["葉", "夜"]]),
+        )
 
     def test_phrase_ranking_is_optional(self) -> None:
         session = CandidateSession(FakeProvider())
         self.assertEqual("", session.best_phrase(["ㄕㄨˋ", "ㄧㄝˋ"]))
+        self.assertEqual([], session.phrase_candidates(["ㄕㄨˋ", "ㄧㄝˋ"]))
+        self.assertEqual(
+            [], session.dictionary_phrase_candidates(["ㄕㄨˋ", "ㄧㄝˋ"])
+        )
+        self.assertEqual(
+            [], session.frequent_phrase_candidates([["樹"], ["葉"]])
+        )
+
+    def test_user_pin_outranks_the_bundled_default(self) -> None:
+        class ProtectedProvider(FakeProvider):
+            TABLE = {"ㄗˋ": ["自", "字"]}
+
+            def prioritize_candidates(self, reading, candidates):
+                if reading == "ㄗˋ":
+                    return ["字"] + [item for item in candidates if item != "字"]
+                return candidates
+
+        pins = PinnedStore()
+        pins.pin("ㄗˋ", "自")
+        session = CandidateSession(ProtectedProvider(), pins)
+        for symbol in "ㄗˋ":
+            session.input_symbol(symbol)
+        self.assertEqual(["自", "字"], session.candidates)
 
     def test_corrupt_pin_file_falls_back_without_blocking_startup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

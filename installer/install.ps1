@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot
 )
@@ -92,6 +92,22 @@ try {
     New-Item -ItemType Directory -Path $targetModule -Force | Out-Null
     Get-ChildItem -LiteralPath $overlayModule -Force |
         Copy-Item -Destination $targetModule -Recurse -Force
+
+    $feedbackTool = Join-Path $targetModule "feedback-report.ps1"
+    if (Test-Path -LiteralPath $feedbackTool) {
+        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+        $shortcutRoot = Join-Path $programs "智慧優先注音"
+        New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
+        $shortcutPath = Join-Path $shortcutRoot "轉換錯誤回報工具.lnk"
+        $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $powershell
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $feedbackTool + '"'
+        $shortcut.WorkingDirectory = $targetModule
+        $shortcut.Description = "檢查、移除或回報智慧優先注音的轉換錯誤"
+        $shortcut.Save()
+    }
 
     # A fresh PIME installation bundles New Chewing. This product needs PIME
     # as infrastructure but exposes only Smart Priority Bopomofo. Never remove
