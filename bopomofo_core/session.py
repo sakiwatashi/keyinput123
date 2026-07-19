@@ -17,7 +17,7 @@ class CandidateSession:
         self,
         provider: CandidateProvider,
         pins: PinnedStore | None = None,
-        max_candidates: int = 5,
+        max_candidates: int = 20,
     ) -> None:
         self.provider = provider
         self.pins = pins or PinnedStore()
@@ -55,6 +55,10 @@ class CandidateSession:
         self.candidates = self._prioritize(
             self.preedit, self._engine_candidates(self.preedit)
         )
+
+    def refresh_candidates(self) -> None:
+        """Refresh after an external priority change."""
+        self._refresh()
 
     def input_symbol(self, symbol: str) -> Event:
         event = self.editor.input_symbol(symbol)

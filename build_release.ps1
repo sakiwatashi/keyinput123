@@ -1,0 +1,83 @@
+param(
+    [string]$MakensisPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$releaseRoot = Join-Path $projectRoot "release"
+$stagingRoot = Join-Path $projectRoot "release-staging"
+$noticeSource = Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt"
+$pimeLicense = Join-Path $stagingRoot "PIME-LICENSE.txt"
+$chewingLicense = Join-Path $stagingRoot "libchewing-COPYING.txt"
+
+function Reset-ProjectDirectory([string]$Path) {
+    $resolvedProject = [IO.Path]::GetFullPath($projectRoot).TrimEnd("\")
+    $resolvedTarget = [IO.Path]::GetFullPath($Path).TrimEnd("\")
+    if (-not $resolvedTarget.StartsWith($resolvedProject + "\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a path outside the project: $resolvedTarget"
+    }
+    if (Test-Path -LiteralPath $resolvedTarget) {
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $resolvedTarget -Force | Out-Null
+}
+
+function Get-VerifiedFile(
+    [string]$LocalCandidate,
+    [string]$Uri,
+    [string]$Destination,
+    [string]$ExpectedSha256
+) {
+    if (Test-Path -LiteralPath $LocalCandidate) {
+        Copy-Item -LiteralPath $LocalCandidate -Destination $Destination -Force
+    }
+    else {
+        Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
+    }
+    $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+    if ($actual -ne $ExpectedSha256) {
+        throw "License checksum mismatch for $Destination (got $actual)."
+    }
+}
+
+Reset-ProjectDirectory $releaseRoot
+Reset-ProjectDirectory $stagingRoot
+
+& (Join-Path $projectRoot "build_pime_overlay.ps1") | Out-Null
+Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $stagingRoot "THIRD_PARTY_NOTICES.txt") -Force
+
+$workspaceRoot = Split-Path -Parent $projectRoot
+Get-VerifiedFile `
+    (Join-Path $workspaceRoot "tmp\PIME-upstream\LICENSE.txt") `
+    "https://raw.githubusercontent.com/EasyIME/PIME/571759f471c93e288682305148df751a12f5415e/LICENSE.txt" `
+    $pimeLicense `
+    "8383DBC7C8938F879BDBFBB6366DF57B3E2B9612B631714D14F0D5FA7F158A8F"
+Get-VerifiedFile `
+    (Join-Path $workspaceRoot "tmp\libchewing-upstream\COPYING") `
+    "https://raw.githubusercontent.com/chewing/libchewing/3c4a93aa03d574c7f011ff84e8a2437c2f79b2cf/COPYING" `
+    $chewingLicense `
+    "1E7E6BAE5A5BDE32F1AE5A7C37A082D1AB03CF89354F7F936AC40BE9E39A6531"
+
+if (-not $MakensisPath) {
+    $candidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+        (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $MakensisPath = $candidates | Select-Object -First 1
+}
+if (-not $MakensisPath -or -not (Test-Path -LiteralPath $MakensisPath)) {
+    throw "NSIS makensis.exe was not found. Install NSIS 3.12 or pass -MakensisPath."
+}
+
+& $MakensisPath "/INPUTCHARSET" "UTF8" (Join-Path $projectRoot "installer\SmartPriorityBopomofo.nsi")
+if ($LASTEXITCODE -ne 0) { throw "NSIS build failed with exit code $LASTEXITCODE." }
+
+$artifact = Join-Path $releaseRoot "Smart-Priority-Bopomofo-Setup-0.2.0.exe"
+if (-not (Test-Path -LiteralPath $artifact)) {
+    throw "The installer artifact was not created."
+}
+$hash = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash
+Set-Content -LiteralPath (Join-Path $releaseRoot "SHA256SUMS.txt") `
+    -Value "$hash  $([IO.Path]::GetFileName($artifact))" -Encoding ASCII
+Write-Output $artifact
+Write-Output "SHA256=$hash"

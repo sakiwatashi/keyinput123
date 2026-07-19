@@ -58,15 +58,16 @@ class CandidateSessionTests(unittest.TestCase):
         self.assertEqual("", session.preedit)
         self.assertEqual([], session.candidates)
 
-    def test_candidate_window_is_limited_to_five(self) -> None:
+    def test_practical_candidate_tail_is_limited_to_twenty(self) -> None:
         class ManyCandidatesProvider:
             def candidates(self, reading):
-                return list("甲乙丙丁戊己庚辛壬癸")
+                return list("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥天地")
 
         session = CandidateSession(ManyCandidatesProvider())
         for symbol in "ㄒㄧㄣˋ":
             session.input_symbol(symbol)
-        self.assertEqual(list("甲乙丙丁戊"), session.candidates)
+        self.assertEqual(20, len(session.candidates))
+        self.assertEqual(list("甲乙丙丁戊"), session.candidates[:5])
 
     def test_phrase_ranking_delegates_to_contextual_provider(self) -> None:
         class ContextualProvider(FakeProvider):
@@ -79,6 +80,16 @@ class CandidateSessionTests(unittest.TestCase):
     def test_phrase_ranking_is_optional(self) -> None:
         session = CandidateSession(FakeProvider())
         self.assertEqual("", session.best_phrase(["ㄕㄨˋ", "ㄧㄝˋ"]))
+
+    def test_corrupt_pin_file_falls_back_without_blocking_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "pins.json"
+            path.write_text("[]", encoding="utf-8")
+
+            pins = PinnedStore(path)
+
+            self.assertEqual([], pins.phrases_for("reading"))
+            self.assertEqual(1, len(list(path.parent.glob("pins.corrupt-*.json"))))
 
 
 if __name__ == "__main__":

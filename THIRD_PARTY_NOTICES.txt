@@ -1,0 +1,27 @@
+智慧優先注音 0.2.0 — 第三方軟體聲明
+========================================
+
+本安裝包包含或搭配下列開放原始碼元件：
+
+1. PIME
+   專案：https://github.com/EasyIME/PIME
+   本安裝包附帶版本：1.3.0 stable
+   原始碼版本（開發驗證）：571759f471c93e288682305148df751a12f5415e
+   授權：GNU Lesser General Public License 2.0（各附帶元件依 PIME
+   LICENSE.txt 所列授權）
+   官方安裝檔保留原作者有效的數位簽章；若電腦已有 PIME，安裝程式不會降版。
+
+2. libchewing
+   專案：https://github.com/chewing/libchewing
+   原始碼版本：3c4a93aa03d574c7f011ff84e8a2437c2f79b2cf
+   授權：GNU Lesser General Public License 2.1 or later
+   詞庫資料識別版本：2025.8.19
+   詞庫資料著作權：Copyright 2025 libchewing Core Team
+
+完整授權條款隨安裝程式放在安裝目錄：
+
+- PIME-LICENSE.txt
+- libchewing-COPYING.txt
+
+個人學習資料位於 %APPDATA%\PinnedBopomofo。解除安裝預設保留該資料，方便
+重新安裝或自行備份。

@@ -110,10 +110,25 @@ def filter_key(service, method: str, key_code: int, sequence: int, shift=False):
     )
 
 
-def tap_shift(service, sequence: int) -> int:
+def tap_shift(service, sequence: int) -> tuple[int, dict]:
     filter_key(service, "filterKeyDown", 0x10, sequence, shift=True)
-    filter_key(service, "filterKeyUp", 0x10, sequence + 1)
-    return sequence + 2
+    filtered = filter_key(service, "filterKeyUp", 0x10, sequence + 1)
+    assert filtered["return"] is True
+    key_states = [0] * 256
+    handled = service.handleRequest(
+        {
+            "method": "onKeyUp",
+            "seqNum": sequence + 2,
+            "charCode": 0,
+            "keyCode": 0x10,
+            "repeatCount": 1,
+            "scanCode": 0,
+            "isExtended": False,
+            "keyStates": key_states,
+        }
+    )
+    assert handled["return"] is True
+    return sequence + 3, handled
 
 
 def type_readings(service, readings: list[str], sequence: int) -> int:
@@ -180,6 +195,22 @@ def main() -> None:
         assert service.session.preedit == ""
 
         # Re-enter 好 so the whole-buffer commit is covered as well.
+        # Deleting in the middle leaves a real insertion gap. The next
+        # syllable must fill that position instead of jumping to the far end.
+        insertion_service = PinnedBopomofoTextService(DummyClient())
+        insertion_readings = ["ㄨㄣˊ", "ㄗˋ", "ㄘㄜˋ", "ㄕˋ"]
+        insertion_sequence = type_readings(
+            insertion_service, insertion_readings, 1000
+        )
+        special_key(insertion_service, 0x25, insertion_sequence)  # VK_LEFT
+        special_key(insertion_service, 0x25, insertion_sequence + 1)
+        special_key(insertion_service, 0x08, insertion_sequence + 2)  # VK_BACK
+        type_readings(insertion_service, ["ㄋㄧˇ"], insertion_sequence + 3)
+        actual_readings = [
+            segment.reading for segment in insertion_service.segments
+        ]
+        assert actual_readings == ["ㄨㄣˊ", "ㄋㄧˇ", "ㄘㄜˋ", "ㄕˋ"]
+
         press(service, "c", 13)
         press(service, "l", 14)
         press(service, "3", 15)
@@ -252,7 +283,7 @@ def main() -> None:
         # A short standalone Shift press toggles Chinese/English.  Printable
         # keys pass through untouched in English mode, and Shift toggles back.
         mode_service = PinnedBopomofoTextService(DummyClient())
-        sequence = tap_shift(mode_service, sequence + 1)
+        sequence, _ = tap_shift(mode_service, sequence + 1)
         assert mode_service.english_mode
         english_a = key_message("a", sequence)
         english_a["method"] = "filterKeyDown"
@@ -261,7 +292,7 @@ def main() -> None:
         key_up_a = key_message("a", sequence + 1)
         key_up_a["method"] = "filterKeyUp"
         mode_service.handleRequest(key_up_a)
-        sequence = tap_shift(mode_service, sequence + 2)
+        sequence, _ = tap_shift(mode_service, sequence + 2)
         assert not mode_service.english_mode
 
         # Shift also switches when an unfinished Bopomofo reading is present;
@@ -269,10 +300,47 @@ def main() -> None:
         partial_service = PinnedBopomofoTextService(DummyClient())
         press(partial_service, "a", sequence)  # ㄇ, not a complete syllable
         assert partial_service.session.preedit == "ㄇ"
-        sequence = tap_shift(partial_service, sequence + 1)
+        sequence, _ = tap_shift(partial_service, sequence + 1)
         assert partial_service.english_mode
         assert partial_service.session.preedit == ""
         assert partial_service.compositionString == ""
+
+        # Completed Chinese text is committed inside onKeyUp before English
+        # input is allowed through, so English cannot jump in front of it.
+        ordering_service = PinnedBopomofoTextService(DummyClient())
+        press(ordering_service, "s", sequence)  # ㄋ
+        press(ordering_service, "u", sequence + 1)  # ㄧ
+        press(ordering_service, "3", sequence + 2)  # ˇ -> 你
+        expected_chinese = ordering_service.compositionString
+        sequence, toggle_reply = tap_shift(ordering_service, sequence + 3)
+        assert toggle_reply["commitString"] == expected_chinese
+        assert toggle_reply["compositionString"] == ""
+        assert ordering_service.english_mode
+
+        # The candidate menu starts compact.  Moving down past candidate five
+        # expands the practical (top-20) list instead of wrapping around.
+        expanded_service = PinnedBopomofoTextService(DummyClient())
+        press(expanded_service, "g", sequence)  # ㄕ
+        press(expanded_service, "4", sequence + 1)  # ˋ
+        assert len(expanded_service.segments[0].candidates) > 5
+        open_reply = special_key(
+            expanded_service, 0x28, sequence + 2
+        )  # open compact list
+        assert open_reply["showCandidates"] is True
+        assert len(expanded_service.candidateList) == 5
+        for offset in range(3, 7):
+            navigation_reply = special_key(
+                expanded_service, 0x28, sequence + offset
+            )
+            assert navigation_reply["showCandidates"] is True
+        assert expanded_service.candidateCursor == 4
+        expansion_reply = special_key(
+            expanded_service, 0x28, sequence + 7
+        )
+        assert expansion_reply["showCandidates"] is True
+        assert expanded_service.candidate_expanded
+        assert len(expanded_service.candidateList) > 5
+        assert expanded_service.candidateCursor == 5
 
         # Invalid phonetics make only the configured gentle sound; the old
         # yellow showMessage tooltip must not be present in the PIME reply.

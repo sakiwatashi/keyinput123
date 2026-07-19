@@ -41,6 +41,7 @@ SHIFT_PUNCTUATION = {
     0xDD: "』",  # Shift+]
 }
 VK_OEM_QUOTE = 0xDE
+COMPACT_CANDIDATE_COUNT = 5
 
 
 @dataclass
@@ -68,6 +69,7 @@ class PinnedBopomofoTextService(TextService):
         self.english_mode = False
         self.last_key_event = None
         self.last_key_down_time = 0.0
+        self.pending_shift_toggle = False
 
         # Completed syllables remain in one TSF composition.  This keeps the
         # underline under the entire uncommitted run and makes every character
@@ -77,6 +79,7 @@ class PinnedBopomofoTextService(TextService):
         self.focus_index: int | None = None
         self.replacement_index: int | None = None
         self.reading_open = False
+        self.candidate_expanded = False
 
     @property
     def provisional(self) -> bool:
@@ -146,8 +149,10 @@ class PinnedBopomofoTextService(TextService):
             if not self._has_candidate_target():
                 return False
             candidates, selected = self._candidate_target()
-            self.setCandidateList(candidates)
-            self.setCandidateCursor(selected)
+            self.candidate_expanded = False
+            visible = self._visible_candidates(candidates)
+            self.setCandidateList(visible)
+            self.setCandidateCursor(min(selected, len(visible) - 1))
             self.setShowCandidates(True)
             self._render_buffer(keep_candidates=True)
             return True
@@ -155,10 +160,22 @@ class PinnedBopomofoTextService(TextService):
         if self.showCandidates and keyEvent.keyCode in (VK_UP, VK_DOWN):
             candidates, _ = self._candidate_target()
             if candidates:
-                delta = -1 if keyEvent.keyCode == VK_UP else 1
-                self.setCandidateCursor(
-                    (self.candidateCursor + delta) % len(candidates)
-                )
+                visible = self._visible_candidates(candidates)
+                if (
+                    keyEvent.keyCode == VK_DOWN
+                    and not self.candidate_expanded
+                    and len(candidates) > len(visible)
+                    and self.candidateCursor == len(visible) - 1
+                ):
+                    self.candidate_expanded = True
+                    visible = self._visible_candidates(candidates)
+                    self.setCandidateList(visible)
+                    self.setCandidateCursor(COMPACT_CANDIDATE_COUNT)
+                else:
+                    delta = -1 if keyEvent.keyCode == VK_UP else 1
+                    self.setCandidateCursor(
+                        (self.candidateCursor + delta) % len(visible)
+                    )
                 self._render_buffer(keep_candidates=True)
             return True
 
@@ -218,7 +235,9 @@ class PinnedBopomofoTextService(TextService):
                     self._bell("已經在文字開頭")
                     return True
                 self.segments.pop(index)
-                self.replacement_index = None
+                # Keep the deletion gap as the insertion point for the next
+                # syllable instead of appending it at the far right.
+                self.replacement_index = index
                 self.reading_open = False
                 self.focus_index = index - 1 if self.segments else None
                 self._apply_phrase_ranking()
@@ -240,9 +259,8 @@ class PinnedBopomofoTextService(TextService):
 
         symbol = symbol_for_event(keyEvent.keyCode, keyEvent.charCode)
         if symbol is not None:
-            # Ordinary typing always continues at the end.  Editing an older
-            # character is explicit: move to it, press Backspace to reopen its
-            # reading, then replace any phonetic slot.
+            # Ordinary typing continues at the end unless Backspace left an
+            # explicit insertion gap inside the composition.
             if not self.session.preedit and self.replacement_index is None:
                 self.focus_index = len(self.segments) - 1 if self.segments else None
             event = self.session.input_symbol(symbol)
@@ -259,11 +277,20 @@ class PinnedBopomofoTextService(TextService):
             and self.last_key_down_time
             and time.time() - self.last_key_down_time < 0.5
         ):
-            self._toggle_language_mode()
+            # Committing a composition from filterKeyUp races the next key:
+            # this callback has no TSF edit session.  Ask PIME for onKeyUp and
+            # perform the state change there instead.
+            self.pending_shift_toggle = True
+            self.last_key_down_time = 0.0
+            return True
         self.last_key_down_time = 0.0
         return False
 
     def onKeyUp(self, keyEvent):
+        if self.pending_shift_toggle and self._is_shift_key(keyEvent.keyCode):
+            self.pending_shift_toggle = False
+            self._toggle_language_mode()
+            return True
         return False
 
     @staticmethod
@@ -342,6 +369,11 @@ class PinnedBopomofoTextService(TextService):
         segment = self.segments[index]
         return segment.candidates, segment.selected
 
+    def _visible_candidates(self, candidates: list[str]) -> list[str]:
+        if self.candidate_expanded:
+            return candidates
+        return candidates[:COMPACT_CANDIDATE_COUNT]
+
     def _choose_highlighted_candidate(self, index: int) -> None:
         candidates, _ = self._candidate_target()
         if index < 0 or index >= len(candidates):
@@ -350,7 +382,7 @@ class PinnedBopomofoTextService(TextService):
         if self.reading_open and self.session.candidates:
             selected = candidates[index]
             self.session.pins.pin(self.session.preedit, selected)
-            self.session._refresh()
+            self.session.refresh_candidates()
             self._accept_active_candidate(0, advance_focus=True)
             return
         target_index = self._candidate_segment_index()
@@ -378,7 +410,7 @@ class PinnedBopomofoTextService(TextService):
         selected = candidates[index]
         if self.reading_open and self.session.candidates:
             self.session.pins.pin(self.session.preedit, selected)
-            self.session._refresh()
+            self.session.refresh_candidates()
         else:
             target_index = self._candidate_segment_index()
             if target_index is None:
@@ -498,8 +530,13 @@ class PinnedBopomofoTextService(TextService):
 
         if keep_candidates and self.showCandidates:
             candidates, _ = self._candidate_target()
-            self.setCandidateList(candidates)
+            self.setCandidateList(self._visible_candidates(candidates))
+            # PIME replies are per key event. Re-assert visibility on every
+            # navigation reply; otherwise the native UI treats the missing
+            # flag as closed even though Python still thinks it is open.
+            self.setShowCandidates(True)
         else:
+            self.candidate_expanded = False
             self.setCandidateList([])
             self.setShowCandidates(False)
             self.setCandidateCursor(0)
@@ -525,6 +562,7 @@ class PinnedBopomofoTextService(TextService):
         self.focus_index = None
         self.replacement_index = None
         self.reading_open = False
+        self.candidate_expanded = False
         self.setCandidateList([])
         self.setShowCandidates(False)
         self.setCandidateCursor(0)

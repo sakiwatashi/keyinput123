@@ -1,1 +1,1 @@
-"""PIME module for the pinned, single-syllable Bopomofo input method."""
+"""PIME module for the Smart Priority Bopomofo input method."""

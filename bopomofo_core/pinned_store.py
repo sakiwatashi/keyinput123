@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from .storage import load_json_object, save_json_object
 
 
 class PinnedStore:
@@ -16,20 +17,17 @@ class PinnedStore:
     def load(self) -> None:
         if self.path is None:
             return
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = load_json_object(self.path)
         self._entries = {
             str(reading): [str(phrase) for phrase in phrases]
             for reading, phrases in raw.items()
+            if isinstance(phrases, list)
         }
 
     def save(self) -> None:
         if self.path is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self._entries, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        save_json_object(self.path, self._entries)
 
     def phrases_for(self, reading: str) -> list[str]:
         return list(self._entries.get(reading, ()))

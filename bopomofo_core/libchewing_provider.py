@@ -14,8 +14,56 @@ from .keymap import keys_for_reading
 SIMPLE_CONVERSION_ENGINE = 0
 PHRASE_CONVERSION_ENGINE = 1
 CHINESE_MODE = 1
-MAX_CANDIDATES = 5
+# Keep a practical long tail for explicit expansion, but stop before the
+# dictionary's rare-character tail becomes noise.
+MAX_CANDIDATES = 20
 MAX_CONTEXT_SYLLABLES = 64
+
+# Conservative Traditional Chinese usage rules. Only unambiguous phrases
+# belong here; ambiguous pairs such as 在做/再做 remain the phrase engine's job.
+COMMON_USAGE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("ㄨㄛˇ", "ㄅㄨˋ", "ㄧㄠˋ"), "我不要"),
+    (("ㄅㄨˋ", "ㄓ", "ㄉㄠˋ"), "不知道"),
+    (("ㄅㄨˋ", "ㄧㄠˋ"), "不要"),
+    (("ㄅㄨˋ", "ㄕˋ"), "不是"),
+    (("ㄅㄨˋ", "ㄏㄨㄟˋ"), "不會"),
+    (("ㄅㄨˋ", "ㄋㄥˊ"), "不能"),
+    (("ㄅㄨˋ", "ㄩㄥˋ"), "不用"),
+    (("ㄅㄨˋ", "ㄒㄧㄤˇ"), "不想"),
+    (("ㄗㄞˋ", "ㄐㄧㄢˋ"), "再見"),
+    (("ㄗㄞˋ", "ㄧ", "ㄘˋ"), "再一次"),
+    (("ㄗㄞˋ", "ㄧㄝˇ"), "再也"),
+    (("ㄗㄞˋ", "ㄌㄞˊ"), "再來"),
+    (("ㄒㄧㄢˋ", "ㄗㄞˋ"), "現在"),
+    (("ㄙㄨㄛˇ", "ㄗㄞˋ"), "所在"),
+    (("ㄍㄣ", "ㄗㄞˋ"), "跟在"),
+    (("ㄓㄥˋ", "ㄗㄞˋ"), "正在"),
+    (("ㄗㄞˋ", "ㄐㄧㄚ"), "在家"),
+    (("ㄗㄞˋ", "ㄓㄜˋ"), "在這"),
+    (("ㄗㄞˋ", "ㄋㄚˋ"), "在那"),
+    (("ㄗㄞˋ", "ㄋㄚˇ"), "在哪"),
+)
+
+
+def prioritize_common_character(reading: str, candidates: list[str]) -> list[str]:
+    """Put a small set of overwhelmingly common characters first."""
+    preferred = {"ㄅㄨˋ": "不"}.get(reading)
+    if preferred is None or preferred not in candidates:
+        return candidates
+    return [preferred] + [candidate for candidate in candidates if candidate != preferred]
+
+
+def apply_common_usage_overrides(readings: list[str], phrase: str) -> str:
+    """Correct unambiguous high-frequency phrases in an engine result."""
+    if len(readings) != len(phrase):
+        return phrase
+    result = list(phrase)
+    for pattern, replacement in COMMON_USAGE_RULES:
+        width = len(pattern)
+        for start in range(len(readings) - width + 1):
+            if tuple(readings[start : start + width]) == pattern:
+                result[start : start + width] = replacement
+    return "".join(result)
 
 
 class LibChewingProvider:
@@ -64,7 +112,7 @@ class LibChewingProvider:
         limit = min(total, MAX_CANDIDATES)
         while self.context.cand_hasNext() and len(results) < limit:
             results.append(self.context.cand_String().decode("utf-8"))
-        return results
+        return prioritize_common_character(reading, results)
 
     def best_phrase(self, readings: list[str]) -> str:
         """Return the phrase dictionary's best text for complete readings."""
@@ -79,4 +127,6 @@ class LibChewingProvider:
         if not value:
             return ""
         phrase = value.decode("utf-8")
-        return phrase if len(phrase) == len(readings) else ""
+        if len(phrase) != len(readings):
+            return ""
+        return apply_common_usage_overrides(readings, phrase)

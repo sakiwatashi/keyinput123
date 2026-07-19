@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from .storage import load_json_object, save_json_object
 
 
 MIN_PHRASE_LENGTH = 2
@@ -25,7 +26,7 @@ class PhraseStore:
     def load(self) -> None:
         if self.path is None:
             return
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = load_json_object(self.path)
         self._entries = {
             str(readings): str(phrase) for readings, phrase in raw.items()
         }
@@ -33,11 +34,7 @@ class PhraseStore:
     def save(self) -> None:
         if self.path is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self._entries, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        save_json_object(self.path, self._entries)
 
     def learn(self, readings: list[str], phrase: str) -> None:
         """Learn every useful n-gram from one user-approved composition."""

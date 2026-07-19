@@ -1,6 +1,6 @@
 {
-  "name": "固定優先注音（單音節）",
-  "version": "0.1.0",
+  "name": "智慧優先注音",
+  "version": "0.2.0",
   "guid": "{26EA5CF3-D515-40BE-9535-E7E98D5EE554}",
   "locale": "zh-Hant-TW",
   "fallbackLocale": "zh-TW",

@@ -1,4 +1,4 @@
-"""Microsoft-Bopomofo-like single-syllable editing core."""
+"""Microsoft-Bopomofo-like editable composition and ranking core."""
 
 from .state import BopomofoEditor, Event, EventKind
 

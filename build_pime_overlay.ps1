@@ -6,6 +6,15 @@ $moduleRoot = Join-Path $distRoot "python\input_methods\pinned_bopomofo"
 $coreDest = Join-Path $moduleRoot "bopomofo_core"
 $chewingDest = Join-Path $moduleRoot "pinned_libchewing"
 
+if (Test-Path -LiteralPath $distRoot) {
+    $resolvedProject = [IO.Path]::GetFullPath($projectRoot).TrimEnd("\")
+    $resolvedDist = [IO.Path]::GetFullPath($distRoot).TrimEnd("\")
+    if (-not $resolvedDist.StartsWith($resolvedProject + "\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a distribution path outside the project."
+    }
+    Remove-Item -LiteralPath $resolvedDist -Recurse -Force
+}
+
 New-Item -ItemType Directory -Path $coreDest -Force | Out-Null
 New-Item -ItemType Directory -Path $chewingDest -Force | Out-Null
 

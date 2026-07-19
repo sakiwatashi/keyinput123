@@ -2,4 +2,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 dist/
+release/
+release-staging/
 *.log
