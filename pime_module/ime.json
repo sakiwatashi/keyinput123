@@ -1,0 +1,11 @@
+{
+  "name": "固定優先注音（單音節）",
+  "version": "0.1.0",
+  "guid": "{26EA5CF3-D515-40BE-9535-E7E98D5EE554}",
+  "locale": "zh-Hant-TW",
+  "fallbackLocale": "zh-TW",
+  "icon": "",
+  "win8_icon": "",
+  "moduleName": "pinned_bopomofo_ime",
+  "serviceName": "PinnedBopomofoTextService"
+}
