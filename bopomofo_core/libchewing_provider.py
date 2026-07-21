@@ -31,7 +31,7 @@ COMMON_USAGE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("ㄗˋ", "ㄐㄧˇ"), "自己"),
     (("ㄗˋ", "ㄨㄛˇ"), "自我"),
     (("ㄨㄛˇ", "ㄅㄨˋ", "ㄧㄠˋ"), "我不要"),
-    (("ㄅㄨˋ", "ㄓ", "ㄉㄠˋ"), "不知道"),
+    (("ㄅㄨˋ", "ㄓˉ", "ㄉㄠˋ"), "不知道"),
     (("ㄅㄨˋ", "ㄧㄠˋ"), "不要"),
     (("ㄅㄨˋ", "ㄕˋ"), "不是"),
     (("ㄅㄨˋ", "ㄏㄨㄟˋ"), "不會"),
@@ -39,14 +39,14 @@ COMMON_USAGE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("ㄅㄨˋ", "ㄩㄥˋ"), "不用"),
     (("ㄅㄨˋ", "ㄒㄧㄤˇ"), "不想"),
     (("ㄗㄞˋ", "ㄐㄧㄢˋ"), "再見"),
-    (("ㄗㄞˋ", "ㄧ", "ㄘˋ"), "再一次"),
+    (("ㄗㄞˋ", "ㄧˉ", "ㄘˋ"), "再一次"),
     (("ㄗㄞˋ", "ㄧㄝˇ"), "再也"),
     (("ㄗㄞˋ", "ㄌㄞˊ"), "再來"),
     (("ㄒㄧㄢˋ", "ㄗㄞˋ"), "現在"),
     (("ㄙㄨㄛˇ", "ㄗㄞˋ"), "所在"),
-    (("ㄍㄣ", "ㄗㄞˋ"), "跟在"),
+    (("ㄍㄣˉ", "ㄗㄞˋ"), "跟在"),
     (("ㄓㄥˋ", "ㄗㄞˋ"), "正在"),
-    (("ㄗㄞˋ", "ㄐㄧㄚ"), "在家"),
+    (("ㄗㄞˋ", "ㄐㄧㄚˉ"), "在家"),
     (("ㄗㄞˋ", "ㄓㄜˋ"), "在這"),
     (("ㄗㄞˋ", "ㄋㄚˋ"), "在那"),
     (("ㄗㄞˋ", "ㄋㄚˇ"), "在哪"),
@@ -57,10 +57,34 @@ def prioritize_common_character(reading: str, candidates: list[str]) -> list[str
     """Put a small set of overwhelmingly common characters first."""
     # These defaults only control an isolated syllable. Contextual word rules
     # below may still turn ㄗˋ into 自 in words such as 自己 and 自我.
-    preferred = {"ㄅㄨˋ": "不", "ㄗˋ": "字"}.get(reading)
+    preferred = {
+        "ㄅㄨˋ": "不",
+        "ㄉㄜ˙": "的",
+        "ㄋㄚˋ": "那",
+        "ㄗˋ": "字",
+    }.get(reading)
     if preferred is None or preferred not in candidates:
         return candidates
     return [preferred] + [candidate for candidate in candidates if candidate != preferred]
+
+
+def add_literal_bopomofo_candidate(
+    reading: str, candidates: list[str]
+) -> list[str]:
+    """Expose the typed Zhuyin itself near the front of complete readings.
+
+    Microsoft Bopomofo offers the literal phonetic spelling as a candidate.
+    First tone is conventionally unmarked in displayed Zhuyin. Keeping this at
+    position two preserves the normal Chinese default while keeping the
+    phonetic spelling visible in a compact Microsoft-style five-item page.
+    """
+    if not reading:
+        return candidates
+    literal = reading[:-1] if reading.endswith("ˉ") else reading
+    if literal in candidates:
+        return candidates
+    insert_at = min(1, len(candidates))
+    return candidates[:insert_at] + [literal] + candidates[insert_at:]
 
 
 def apply_common_usage_overrides(readings: list[str], phrase: str) -> str:
@@ -116,14 +140,15 @@ class LibChewingProvider:
 
         total = self.context.cand_TotalChoice()
         if total <= 0:
-            return []
+            return add_literal_bopomofo_candidate(reading, [])
         self.context.cand_Enumerate()
         results: list[str] = []
         limit = min(total, MAX_CANDIDATES)
         while self.context.cand_hasNext() and len(results) < limit:
             results.append(self.context.cand_String().decode("utf-8"))
         results = TAIWAN_FREQUENCY.rank_characters(results)
-        return prioritize_common_character(reading, results)
+        results = prioritize_common_character(reading, results)
+        return add_literal_bopomofo_candidate(reading, results)[:MAX_CANDIDATES]
 
     def best_phrase(self, readings: list[str]) -> str:
         """Return the phrase dictionary's best text for complete readings."""
@@ -193,3 +218,10 @@ class LibChewingProvider:
             candidate_columns, limit=MAX_CANDIDATES
         )
         return list(dict.fromkeys(taiwan + expanded))[:MAX_CANDIDATES]
+
+    @staticmethod
+    def is_frequent_phrase(phrase: str) -> bool:
+        """Recognize valid bundled words even outside the top-20 result tail."""
+        return TAIWAN_FREQUENCY.contains_phrase(phrase) or FREQUENCY_LEXICON.contains(
+            phrase
+        )

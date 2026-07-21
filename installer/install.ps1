@@ -8,6 +8,7 @@ $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E9
 $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
 $logPath = Join-Path $logRoot "install.log"
+$nativeStateRoot = Join-Path $logRoot "native-state"
 $installedPimeThisRun = $false
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 Start-Transcript -LiteralPath $logPath -Force | Out-Null
@@ -127,6 +128,105 @@ try {
     if (Test-Path -LiteralPath $embeddedPython) {
         & $embeddedPython -m compileall -q $targetModule
         if ($LASTEXITCODE -ne 0) { throw "The module compile check failed." }
+    }
+
+    # The native candidate window is shared by every PIME profile. Apply our
+    # modern UI only when this PIME installation contains no unrelated input
+    # methods. Preserve the original DLLs so uninstall can restore them.
+    $pythonMethods = Join-Path $resolvedRoot "python\input_methods"
+    $nodeMethods = Join-Path $resolvedRoot "node\input_methods"
+    $otherPythonModules = @(
+        Get-ChildItem -LiteralPath $pythonMethods -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin @($moduleName, "__pycache__") }
+    )
+    $otherNodeModules = @(
+        Get-ChildItem -LiteralPath $nodeMethods -Directory -ErrorAction SilentlyContinue
+    )
+    $nativeUiPayload = Join-Path $PayloadRoot "overlay\native_ui\bin"
+    $canInstallNativeUi = (
+        $otherPythonModules.Count -eq 0 -and $otherNodeModules.Count -eq 0 -and
+        (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x86\PIMETextService.dll")) -and
+        (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x64\PIMETextService.dll"))
+    )
+    if ($canInstallNativeUi) {
+        $backupRoot = Join-Path $nativeStateRoot "backup"
+        $pendingRoot = Join-Path $nativeStateRoot "pending"
+        New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+        $nativeHashes = @{}
+        $nativeUpdatePending = $false
+        if (-not ("SmartPriorityNativeMethods" -as [type])) {
+            Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class SmartPriorityNativeMethods {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool MoveFileEx(
+        string existingFile,
+        string newFile,
+        int flags
+    );
+}
+"@
+        }
+        foreach ($architecture in @("x86", "x64")) {
+            $sourceDll = Join-Path $nativeUiPayload "$architecture\PIMETextService.dll"
+            $targetDll = Join-Path $resolvedRoot "$architecture\PIMETextService.dll"
+            $backupDll = Join-Path $backupRoot "$architecture\PIMETextService.dll"
+            $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceDll).Hash
+            New-Item -ItemType Directory -Path (Split-Path -Parent $backupDll) -Force | Out-Null
+            if ((Test-Path -LiteralPath $targetDll) -and -not (Test-Path -LiteralPath $backupDll)) {
+                Copy-Item -LiteralPath $targetDll -Destination $backupDll -Force
+            }
+            # Reinstalling the Python layer is common during development. Do
+            # not touch or re-queue a native DLL that is already current.
+            if ((Test-Path -LiteralPath $targetDll) -and
+                (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash -eq $sourceHash) {
+                $nativeHashes[$architecture] = $sourceHash
+                continue
+            }
+            try {
+                Copy-Item -LiteralPath $sourceDll -Destination $targetDll -Force
+            }
+            catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+                # TSF loads this DLL into every text application, so Windows
+                # commonly keeps it locked. Stage a persistent copy and ask
+                # the kernel to replace it safely at the next reboot.
+                $pendingDll = Join-Path $pendingRoot "$architecture\PIMETextService.dll"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $pendingDll) -Force | Out-Null
+                Copy-Item -LiteralPath $sourceDll -Destination $pendingDll -Force
+                $sessionManager = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
+                $pendingMoves = (Get-ItemProperty -LiteralPath $sessionManager `
+                    -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+                $pendingText = @($pendingMoves) -join "`n"
+                $alreadyScheduled = (
+                    $pendingText.IndexOf($pendingDll, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                    $pendingText.IndexOf($targetDll, [StringComparison]::OrdinalIgnoreCase) -ge 0
+                )
+                if (-not $alreadyScheduled) {
+                    $moveFileDelayUntilReboot = 0x4
+                    $moveFileReplaceExisting = 0x1
+                    $scheduled = [SmartPriorityNativeMethods]::MoveFileEx(
+                        $pendingDll,
+                        $targetDll,
+                        $moveFileDelayUntilReboot -bor $moveFileReplaceExisting
+                    )
+                    if (-not $scheduled) {
+                        $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                        throw "Unable to schedule the $architecture native UI update (Win32 $win32Error)."
+                    }
+                }
+                $nativeUpdatePending = $true
+                $nativeHashes[$architecture + "Pending"] = $true
+            }
+            $nativeHashes[$architecture] = $sourceHash
+        }
+        $nativeHashes | ConvertTo-Json | Set-Content `
+            -LiteralPath (Join-Path $nativeStateRoot "native-ui.json") -Encoding UTF8
+        if ($nativeUpdatePending) {
+            Write-Output "The modern candidate UI will finish installing after the next Windows restart."
+        }
     }
 
     $x86Dll = Join-Path $resolvedRoot "x86\PIMETextService.dll"

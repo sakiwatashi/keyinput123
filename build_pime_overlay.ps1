@@ -44,4 +44,18 @@ foreach ($name in "word.dat", "tsi.dat", "swkb.dat", "symbols.dat") {
     Copy-Item -LiteralPath (Join-Path $runtimeChewing "data\$name") -Destination (Join-Path $chewingDest "data") -Force
 }
 
+$nativeUiSource = Join-Path $projectRoot "native_ui"
+$nativeUiDest = Join-Path $distRoot "native_ui"
+foreach ($required in @(
+    (Join-Path $nativeUiSource "bin\x86\PIMETextService.dll"),
+    (Join-Path $nativeUiSource "bin\x64\PIMETextService.dll"),
+    (Join-Path $nativeUiSource "src\CandidateWindow.cpp"),
+    (Join-Path $nativeUiSource "LGPL-2.0.txt")
+)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "The native candidate UI payload is missing: $required"
+    }
+}
+Copy-Item -LiteralPath $nativeUiSource -Destination $nativeUiDest -Recurse -Force
+
 Write-Output $distRoot

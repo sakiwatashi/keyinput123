@@ -1,6 +1,8 @@
 import unittest
 
 from bopomofo_core.libchewing_provider import (
+    COMMON_USAGE_RULES,
+    add_literal_bopomofo_candidate,
     apply_common_usage_overrides,
     prioritize_common_character,
 )
@@ -26,6 +28,33 @@ class CommonUsageTests(unittest.TestCase):
             "自我",
             apply_common_usage_overrides(["ㄗˋ", "ㄨㄛˇ"], "字我"),
         )
+
+    def test_na_defaults_to_demonstrative_not_inside(self) -> None:
+        self.assertEqual(
+            ["那", "內", "納"],
+            prioritize_common_character("ㄋㄚˋ", ["內", "那", "納"]),
+        )
+
+    def test_de_defaults_to_possessive_particle(self) -> None:
+        self.assertEqual(
+            ["的", "得", "地"],
+            prioritize_common_character("ㄉㄜ˙", ["得", "地", "的"]),
+        )
+
+    def test_complete_reading_exposes_literal_zhuyin_without_replacing_default(self) -> None:
+        for reading, literal in (
+            ("ㄢˉ", "ㄢ"),
+            ("ㄢˊ", "ㄢˊ"),
+            ("ㄢˇ", "ㄢˇ"),
+            ("ㄢˋ", "ㄢˋ"),
+            ("ㄢ˙", "ㄢ˙"),
+        ):
+            with self.subTest(reading=reading):
+                ranked = add_literal_bopomofo_candidate(
+                    reading, ["安", "鞍", "庵", "諳"]
+                )
+                self.assertEqual("安", ranked[0])
+                self.assertEqual(literal, ranked[1])
 
     def test_bu_phrases_are_forced_to_common_usage(self) -> None:
         self.assertEqual(
@@ -57,8 +86,10 @@ class CommonUsageTests(unittest.TestCase):
         examples = (
             (["ㄗㄞˋ", "ㄐㄧㄢˋ"], "在見", "再見"),
             (["ㄒㄧㄢˋ", "ㄗㄞˋ"], "現再", "現在"),
-            (["ㄍㄣ", "ㄗㄞˋ"], "跟再", "跟在"),
-            (["ㄗㄞˋ", "ㄐㄧㄚ"], "再家", "在家"),
+            (["ㄍㄣˉ", "ㄗㄞˋ"], "跟再", "跟在"),
+            (["ㄗㄞˋ", "ㄐㄧㄚˉ"], "再家", "在家"),
+            (["ㄗㄞˋ", "ㄧˉ", "ㄘˋ"], "在一刺", "再一次"),
+            (["ㄅㄨˋ", "ㄓˉ", "ㄉㄠˋ"], "部之到", "不知道"),
         )
         for readings, engine_result, expected in examples:
             with self.subTest(expected=expected):
@@ -66,6 +97,12 @@ class CommonUsageTests(unittest.TestCase):
                     expected,
                     apply_common_usage_overrides(readings, engine_result),
                 )
+
+    def test_every_common_usage_reading_is_a_completed_syllable(self) -> None:
+        tones = frozenset("ˉˊˇˋ˙")
+        for pattern, replacement in COMMON_USAGE_RULES:
+            with self.subTest(replacement=replacement):
+                self.assertTrue(all(reading[-1:] in tones for reading in pattern))
 
     def test_ambiguous_zai_phrase_is_left_to_the_engine(self) -> None:
         self.assertEqual(

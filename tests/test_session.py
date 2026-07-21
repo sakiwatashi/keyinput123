@@ -125,6 +125,26 @@ class CandidateSessionTests(unittest.TestCase):
             session.input_symbol(symbol)
         self.assertEqual(["自", "字"], session.candidates)
 
+    def test_malformed_multi_character_pin_cannot_break_segment_alignment(self) -> None:
+        class CharacterProvider(FakeProvider):
+            TABLE = {"ㄗˋ": ["字", "自"]}
+
+        pins = PinnedStore()
+        pins.pin("ㄗˋ", "不是單字")
+        session = CandidateSession(CharacterProvider(), pins)
+        for symbol in "ㄗˋ":
+            session.input_symbol(symbol)
+        self.assertEqual(["字", "自"], session.candidates)
+        self.assertTrue(all(len(candidate) == 1 for candidate in session.candidates))
+
+        invalid_pins = PinnedStore()
+        invalid_pins.pin("ㄅˋ", "不是單字")
+        invalid = CandidateSession(CharacterProvider(), invalid_pins)
+        invalid.input_symbol("ㄅ")
+        event = invalid.input_symbol("ˋ")
+        self.assertEqual(EventKind.BELL, event.kind)
+        self.assertEqual("ㄅ", invalid.preedit)
+
     def test_corrupt_pin_file_falls_back_without_blocking_startup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "pins.json"

@@ -1,4 +1,4 @@
-智慧優先注音 0.4.2 — 第三方軟體聲明
+智慧優先注音 0.6.0 — 第三方軟體聲明
 ========================================
 
 本安裝包包含或搭配下列開放原始碼元件：
@@ -6,10 +6,14 @@
 1. PIME
    專案：https://github.com/EasyIME/PIME
    本安裝包附帶版本：1.3.0 stable
-   原始碼版本（開發驗證）：571759f471c93e288682305148df751a12f5415e
+   隨附安裝程式來源版本：571759f471c93e288682305148df751a12f5415e
+   修改候選框來源版本：26fcf6ac8874e76b8f75f6826811b03bfdfc2e89
+   （PIME v1.3.0-stable；libIME2 8ad3c9b433d930ce5614c483461dfa78cedb5efd）
    授權：GNU Lesser General Public License 2.0（各附帶元件依 PIME
    LICENSE.txt 所列授權）
    官方安裝檔保留原作者有效的數位簽章；若電腦已有 PIME，安裝程式不會降版。
+   `native_ui` 內附修改後的完整來源、LGPL 條款與可重現建置腳本；候選框 DLL
+   僅在沒有其他 PIME 輸入法模組時套用，解除安裝時還原備份。
 
 2. libchewing
    專案：https://github.com/chewing/libchewing

@@ -19,9 +19,35 @@
 - `bopomofo_core/pinned_store.py`：單一讀音的個人優先字。
 - `bopomofo_core/phrase_store.py`：使用者確認過的 2–12 字詞語。
 - `bopomofo_core/frequency_lexicon.py`：離線高頻詞索引查詢；資料位於 `bopomofo_core/data/`。
+- `bopomofo_core/autocorrect.py`：Enter 送出前的離線高可信錯字修正；規則位於 `bopomofo_core/data/common_typos.json`。
+- `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tests/`：核心與 PIME 整合測試。
 - `installer/`：正式安裝與解除安裝流程。
+- `native_ui/`：候選框的完整 LGPL 原始碼、可重現建置腳本及 x86/x64 產物。
+
+候選視窗的字型、每列數量、選擇標籤與方向鍵行為由 Python 模組控制；圓角、顏色、
+邊框與選取樣式位於 `native_ui/src/CandidateWindow.cpp`。原生元件固定從隨附的
+PIME `v1.3.0-stable` 重建；安裝程式只在沒有其他 PIME 模組時套用，並備份與還原
+原始 DLL。被 TSF 鎖定時以 `MoveFileEx` 排程至重開機，不能把這些限制拿掉。
+
+候選窗每頁固定 10 個、分成兩個直欄：左欄由上而下 `1–5`，右欄由上而下 `6–0`；`→` 直接翻到下一頁，`↓` 依數字順序逐項移動並在
+本頁末端翻頁。完整讀音的原始注音須留在前四個候選。單獨注音按空白時一律先向
+字典查詢補上一聲後的候選，不可單靠 initial／medial／rime 分類判定，因為 `ㄙ`、
+`ㄓ` 等聲母本身也是完整音節。字典候選零是中文字時直接採用；候選零仍是原注音
+時必須開啟原符號第一的選單，不可讓尾端生僻字自動勝出。原注音仍須保留在前四項。
+沒有作用中的音節時，大千聲調鍵直接輸出符號（3=ˇ、6=ˊ、4=ˋ、7=˙）；右側數字
+鍵盤的數字、小數點與 `/ * - +` 必須直接輸出原字元，不可進入注音映射。
+
+精確注音的常用詞重新排序會即時更新未鎖定的組字內容；模糊讀音與補充錯字規則只在
+使用者按 Enter 確認整段文字時執行，空白鍵送出必須保持原文。規則必須
+等長、精確、高可信且附來源。當次親自選字與個人詞彙所涵蓋的字元須設為保護範圍；
+已儲存的單字優先只控制單一讀音排序，不得鎖死整句脈絡。`的／得／地`、`在／再`、合法異形詞等需要語境的
+項目不可加入無條件規則。執行期間不得傳送文字到網路，也不得把自動修正當成個人學習。
+
+完整句預設與候選視窗必須共用 `_ranked_phrase_options()`；開啟候選及任何送出動作前
+都要先執行 `_apply_phrase_ranking()`。禁止新增只在候選視窗可見、但不會同步到組字區
+的另一套第一候選邏輯。方向鍵是改選功能，不是取得系統已知正解的必要步驟。
 
 ## 修改後必須驗證
 
@@ -29,6 +55,7 @@
 python -m unittest discover -s tests -v
 .\build_pime_overlay.ps1
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_adapter_smoke.py
+.\native_ui\build_native_ui.ps1
 .\build_release.ps1
 ```
 
@@ -63,7 +90,8 @@ Git Bash 使用：
 
 - `tools/build_taiwan_frequency.py` 從教育部字頻／詞頻 CSV 重建台灣預設排序；
   `bopomofo_core/data/taiwan_frequency.json` 是產物，不可手改。
-- 使用者明確選擇永遠最高；內建候選先比較詞彙涵蓋的音節數，較短後綴不可
+- 當次使用者明確選擇永遠最高；儲存的單字優先在孤立讀音中列為候選零，但可靠的
+  整詞／整句脈絡可覆蓋它。內建候選先比較詞彙涵蓋的音節數，較短後綴不可
   覆蓋較長完整轉換，涵蓋相同時再依台灣官方字詞頻、其他內建詞庫排序。
   一般送出文字不可自動強化個人權重。
 - `bopomofo_core/feedback_store.py` 與 `feedback-report.ps1` 只保存明確改選

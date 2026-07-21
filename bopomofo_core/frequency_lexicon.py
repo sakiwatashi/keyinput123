@@ -64,3 +64,16 @@ class FrequencyLexicon:
                 ranked.items(), key=lambda row: (-row[1], row[0])
             )[:limit]
         ]
+
+    def contains(self, phrase: str) -> bool:
+        """Return whether the complete phrase exists beyond the result limit."""
+        if len(phrase) < 2:
+            return False
+        bucket = self._buckets.get(str(len(phrase)), {})
+        if not isinstance(bucket, dict):
+            return False
+        rows = bucket.get(phrase[0], [])
+        return isinstance(rows, list) and any(
+            isinstance(row, list) and len(row) == 2 and row[0] == phrase
+            for row in rows
+        )

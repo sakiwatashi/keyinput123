@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "name": "智慧優先注音高可信常見錯字規則",
+    "version": 3,
+    "policy": "只收錄可作精確字串替換、字數相同且不依賴歧義語境的臺灣正體中文錯字。教育部資料僅用於正詞與用例核對，不重製辭典釋義。",
+    "sources": [
+      {
+        "id": "naer_usage_analysis",
+        "title": "國家教育研究院《國語文非選擇題怎麼寫》附錄一：用字分析",
+        "url": "https://teric.naer.edu.tw/wSite/PDFReader?fileName=1421184541220&format=pdf&xmlId=1820524"
+      },
+      {
+        "id": "moe_dictionary_validation",
+        "title": "教育部國語辭典公眾授權網（簡編本、小字典與成語典）",
+        "url": "https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/index.html"
+      }
+    ]
+  },
+  "rules": [
+    {"wrong": "以經", "correct": "已經", "source": "naer_usage_analysis"},
+    {"wrong": "由其", "correct": "尤其", "source": "naer_usage_analysis"},
+    {"wrong": "而以", "correct": "而已", "source": "naer_usage_analysis"},
+    {"wrong": "即然", "correct": "既然", "source": "moe_dictionary_validation"},
+    {"wrong": "必竟", "correct": "畢竟", "source": "moe_dictionary_validation"},
+    {"wrong": "一但", "correct": "一旦", "source": "naer_usage_analysis"},
+    {"wrong": "致於", "correct": "至於", "source": "naer_usage_analysis"},
+    {"wrong": "難勉", "correct": "難免", "source": "naer_usage_analysis"},
+    {"wrong": "份內", "correct": "分內", "source": "naer_usage_analysis"},
+    {"wrong": "本份", "correct": "本分", "source": "naer_usage_analysis"},
+    {"wrong": "迴饋", "correct": "回饋", "source": "naer_usage_analysis"},
+    {"wrong": "分折", "correct": "分析", "source": "naer_usage_analysis"},
+    {"wrong": "家庭煮婦", "correct": "家庭主婦", "source": "naer_usage_analysis"},
+    {"wrong": "不同凡想", "correct": "不同凡響", "source": "naer_usage_analysis"},
+    {"wrong": "迫不急待", "correct": "迫不及待", "source": "moe_dictionary_validation"},
+    {"wrong": "按步就班", "correct": "按部就班", "source": "moe_dictionary_validation"},
+    {"wrong": "一股作氣", "correct": "一鼓作氣", "source": "moe_dictionary_validation"},
+    {"wrong": "再接再勵", "correct": "再接再厲", "source": "moe_dictionary_validation"},
+    {"wrong": "不徑而走", "correct": "不脛而走", "source": "moe_dictionary_validation"},
+    {"wrong": "默守成規", "correct": "墨守成規", "source": "moe_dictionary_validation"},
+    {"wrong": "談笑風聲", "correct": "談笑風生", "source": "moe_dictionary_validation"},
+    {"wrong": "走頭無路", "correct": "走投無路", "source": "moe_dictionary_validation"},
+    {"wrong": "一愁莫展", "correct": "一籌莫展", "source": "moe_dictionary_validation"},
+    {"wrong": "針貶時事", "correct": "針砭時事", "source": "moe_dictionary_validation"},
+    {"wrong": "出奇不意", "correct": "出其不意", "source": "moe_dictionary_validation"},
+    {"wrong": "名列前矛", "correct": "名列前茅", "source": "moe_dictionary_validation"},
+    {"wrong": "一如即往", "correct": "一如既往", "source": "moe_dictionary_validation"},
+    {"wrong": "天翻地復", "correct": "天翻地覆", "source": "moe_dictionary_validation"},
+    {"wrong": "食不裹腹", "correct": "食不果腹", "source": "moe_dictionary_validation"},
+    {"wrong": "有侍無恐", "correct": "有恃無恐", "source": "moe_dictionary_validation"},
+    {"wrong": "甘敗下風", "correct": "甘拜下風", "source": "moe_dictionary_validation"},
+    {"wrong": "蛛絲螞跡", "correct": "蛛絲馬跡", "source": "moe_dictionary_validation"},
+    {"wrong": "聲名雀起", "correct": "聲名鵲起", "source": "moe_dictionary_validation"},
+    {"wrong": "鬼鬼崇崇", "correct": "鬼鬼祟祟", "source": "moe_dictionary_validation"},
+    {"wrong": "金榜提名", "correct": "金榜題名", "source": "moe_dictionary_validation"},
+    {"wrong": "脈博", "correct": "脈搏", "source": "moe_dictionary_validation"},
+    {"wrong": "松馳", "correct": "鬆弛", "source": "moe_dictionary_validation"},
+    {"wrong": "修茸", "correct": "修葺", "source": "moe_dictionary_validation"},
+    {"wrong": "編篡", "correct": "編纂", "source": "moe_dictionary_validation"},
+    {"wrong": "親睞", "correct": "青睞", "source": "moe_dictionary_validation"},
+    {"wrong": "冒然", "correct": "貿然", "source": "moe_dictionary_validation"},
+    {"wrong": "不醒人事", "correct": "不省人事", "source": "moe_dictionary_validation"},
+    {"wrong": "一泄千里", "correct": "一瀉千里", "source": "moe_dictionary_validation"},
+    {"wrong": "一諾千斤", "correct": "一諾千金", "source": "moe_dictionary_validation"},
+    {"wrong": "老生長談", "correct": "老生常談", "source": "moe_dictionary_validation"},
+    {"wrong": "相形見拙", "correct": "相形見絀", "source": "moe_dictionary_validation"}
+  ]
+}

@@ -35,6 +35,10 @@ class CandidateSession:
     def _engine_candidates(self, reading: str) -> list[str]:
         return list(dict.fromkeys(self.provider.candidates(reading)))
 
+    def candidates_for_reading(self, reading: str) -> list[str]:
+        """Return ranked candidates without mutating the active editor."""
+        return self._prioritize(reading, self._engine_candidates(reading))
+
     def best_phrase(self, readings: list[str]) -> str:
         converter = getattr(self.provider, "best_phrase", None)
         return converter(readings) if converter is not None else ""
@@ -63,15 +67,30 @@ class CandidateSession:
             : self.max_candidates
         ]
 
+    def is_frequent_phrase(self, phrase: str) -> bool:
+        validator = getattr(self.provider, "is_frequent_phrase", None)
+        return bool(validator(phrase)) if validator is not None else False
+
+    def _valid_pins(self, reading: str) -> list[str]:
+        return [
+            candidate
+            for candidate in self.pins.phrases_for(reading)
+            if len(candidate) == 1
+        ]
+
     def _prioritize(self, reading: str, engine_candidates: list[str]) -> list[str]:
-        pinned = self.pins.phrases_for(reading)
+        # A per-reading pin normally represents exactly one output character.
+        # Ignore malformed/manual multi-character values so one damaged
+        # preference cannot break the one-syllable/one-segment alignment used
+        # by editing and Enter correction.
+        pinned = self._valid_pins(reading)
         # Explicit user choices always outrank every bundled language model.
         return list(dict.fromkeys(pinned + engine_candidates))[: self.max_candidates]
 
     def _validate(self, reading: str) -> bool:
         if not self._is_complete(reading):
             return True
-        return bool(self._engine_candidates(reading) or self.pins.phrases_for(reading))
+        return bool(self._engine_candidates(reading) or self._valid_pins(reading))
 
     def _refresh(self) -> None:
         if not self._is_complete(self.preedit):

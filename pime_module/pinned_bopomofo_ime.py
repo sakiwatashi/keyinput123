@@ -12,16 +12,19 @@ from keycodes import *
 from textService import TextService
 
 from . import pinned_libchewing
+from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.keymap import symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_store import MAX_PHRASE_LENGTH, PhraseStore
+from .bopomofo_core.phonetic_corrector import PhoneticCorrector
 from .bopomofo_core.pinned_store import PinnedStore
 from .bopomofo_core.session import CandidateSession
-from .bopomofo_core.state import Event, EventKind
+from .bopomofo_core.state import INITIALS, MEDIALS, RIMES, TONES, Event, EventKind
 
 
 SHIFT_PUNCTUATION = {
+    0x20: "ˉ",  # Shift+Space: standalone first-tone mark
     0x31: "！",
     0x32: "＠",
     0x33: "＃",
@@ -42,12 +45,19 @@ SHIFT_PUNCTUATION = {
     0xDD: "』",  # Shift+]
 }
 VK_OEM_QUOTE = 0xDE
-COMPACT_CANDIDATE_COUNT = 5
+CANDIDATE_PAGE_SIZE = 10
 MAX_PHRASE_CHOICES = 12
+CANDIDATES_PER_ROW = 2
+CANDIDATE_SELECTION_LABELS = "1234567890"
 NUMPAD_TEXT = {
     **{key_code: str(key_code - 0x60) for key_code in range(0x60, 0x6A)},
+    0x6A: "*",  # VK_MULTIPLY
+    0x6B: "+",  # VK_ADD
+    0x6D: "-",  # VK_SUBTRACT
     0x6E: ".",  # VK_DECIMAL
+    0x6F: "/",  # VK_DIVIDE
 }
+BOPOMOFO_TEXT = INITIALS | MEDIALS | RIMES | TONES
 
 
 @dataclass
@@ -86,6 +96,8 @@ class PinnedBopomofoTextService(TextService):
         self.session = CandidateSession(provider, PinnedStore(pin_path))
         self.phrase_store = PhraseStore(phrase_path)
         self.feedback_store = FeedbackStore(feedback_path)
+        self.autocorrector = Autocorrector()
+        self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         self.quote_open = False
         self.english_mode = False
         self.last_key_event = None
@@ -100,7 +112,7 @@ class PinnedBopomofoTextService(TextService):
         self.focus_index: int | None = None
         self.replacement_index: int | None = None
         self.reading_open = False
-        self.candidate_expanded = False
+        self.candidate_page = 0
         self.candidate_choices: list[CandidateChoice] = []
 
     @property
@@ -111,11 +123,16 @@ class PinnedBopomofoTextService(TextService):
     def onActivate(self):
         super().onActivate()
         self._restore_chinese_keyboard()
-        self.setSelKeys("12345")
+        # Each page exposes exactly ten numeric selection keys. The native UI
+        # fills its two columns from top to bottom: 1-5 on the left and 6-0 on
+        # the right. Keeping the native list and label string the same length
+        # prevents PIME from
+        # reading past the labels and painting garbage characters.
+        self.setSelKeys(CANDIDATE_SELECTION_LABELS)
         self.customizeUI(
             candFontName="Microsoft JhengHei UI",
-            candFontSize=18,
-            candPerRow=1,
+            candFontSize=16,
+            candPerRow=CANDIDATES_PER_ROW,
             candUseCursor=True,
         )
 
@@ -157,10 +174,15 @@ class PinnedBopomofoTextService(TextService):
             return True
         if keyEvent.keyCode == VK_SPACE:
             return self.isComposing()
+        if self.showCandidates and keyEvent.keyCode in (
+            VK_UP,
+            VK_DOWN,
+            VK_LEFT,
+            VK_RIGHT,
+        ):
+            return True
         if keyEvent.keyCode == VK_DOWN:
             return self._has_candidate_target()
-        if keyEvent.keyCode == VK_UP:
-            return self.showCandidates
         if keyEvent.keyCode in (VK_LEFT, VK_RIGHT):
             return bool(self.segments) and not self.session.preedit
         if keyEvent.keyCode in (VK_RETURN, VK_BACK, VK_ESCAPE):
@@ -202,11 +224,15 @@ class PinnedBopomofoTextService(TextService):
         if keyEvent.keyCode == VK_DOWN and not self.showCandidates:
             if not self._has_candidate_target():
                 return False
+            # The menu must never reveal a better default that the editable
+            # composition has not already adopted. Synchronize through the
+            # same phrase ranking source before presenting alternatives.
+            self._apply_phrase_ranking()
             self.candidate_choices = self._build_candidate_choices()
             candidates, selected = self._candidate_target()
             if not candidates:
                 return False
-            self.candidate_expanded = False
+            self.candidate_page = 0
             visible = self._visible_candidates(candidates)
             self.setCandidateList(visible)
             self.setCandidateCursor(min(selected, len(visible) - 1))
@@ -214,26 +240,13 @@ class PinnedBopomofoTextService(TextService):
             self._render_buffer(keep_candidates=True)
             return True
 
-        if self.showCandidates and keyEvent.keyCode in (VK_UP, VK_DOWN):
-            candidates, _ = self._candidate_target()
-            if candidates:
-                visible = self._visible_candidates(candidates)
-                if (
-                    keyEvent.keyCode == VK_DOWN
-                    and not self.candidate_expanded
-                    and len(candidates) > len(visible)
-                    and self.candidateCursor == len(visible) - 1
-                ):
-                    self.candidate_expanded = True
-                    visible = self._visible_candidates(candidates)
-                    self.setCandidateList(visible)
-                    self.setCandidateCursor(COMPACT_CANDIDATE_COUNT)
-                else:
-                    delta = -1 if keyEvent.keyCode == VK_UP else 1
-                    self.setCandidateCursor(
-                        (self.candidateCursor + delta) % len(visible)
-                    )
-                self._render_buffer(keep_candidates=True)
+        if self.showCandidates and keyEvent.keyCode in (
+            VK_UP,
+            VK_DOWN,
+            VK_LEFT,
+            VK_RIGHT,
+        ):
+            self._navigate_candidate_menu(keyEvent.keyCode)
             return True
 
         if self.showCandidates and keyEvent.keyCode == VK_RETURN:
@@ -257,9 +270,32 @@ class PinnedBopomofoTextService(TextService):
                 return False
             if self.session.preedit:
                 if self.reading_open and self.session.candidates:
+                    if self._is_literal_bopomofo(self.session.candidates[0]):
+                        self._emit_direct_text(self.session.candidates[0])
+                        return True
                     self._accept_active_candidate(0)
                     return True
+                # Space supplies the implicit first tone. Do not decide from
+                # the symbol's slot alone: several symbols classed as initials
+                # are also complete Mandarin syllables (ㄙ→司/思, ㄓ→之/知,
+                # ㄔ→吃, ㄕ→師, ㄗ→資, ...). The dictionary is the source of
+                # truth; only a reading with no Chinese candidate falls back
+                # to literal Zhuyin.
+                literal = self.session.preedit
                 event = self.session.input_symbol("ˉ")
+                if event.kind is EventKind.BELL and self.session.preedit:
+                    # This exact first-tone reading has no Chinese syllable,
+                    # but Microsoft Bopomofo still lets users output the raw
+                    # Zhuyin symbol through the candidate window.
+                    literal = self.session.preedit
+                    self.session.candidates = [literal]
+                    self.reading_open = True
+                    self.candidate_page = 0
+                    self.setCandidateList([literal])
+                    self.setCandidateCursor(0)
+                    self.setShowCandidates(True)
+                    self._render_buffer(keep_candidates=True)
+                    return True
                 self._handle_session_event(event)
                 return True
             self._commit_buffer(" ")
@@ -311,11 +347,14 @@ class PinnedBopomofoTextService(TextService):
                 else:
                     self._bell("注音尚未完整")
                     return True
-            self._commit_buffer()
+            self._commit_buffer(apply_autocorrect=True)
             return True
 
         symbol = symbol_for_event(keyEvent.keyCode, keyEvent.charCode)
         if symbol is not None:
+            if symbol in TONES and not self.session.preedit:
+                self._emit_direct_text(symbol)
+                return True
             # Ordinary typing continues at the end unless Backspace left an
             # explicit insertion gap inside the composition.
             if not self.session.preedit and self.replacement_index is None:
@@ -379,10 +418,14 @@ class PinnedBopomofoTextService(TextService):
         # The right-hand numeric keypad is text input, never a candidate key.
         if keyEvent.keyCode in NUMPAD_TEXT:
             return None
-        if 0x31 <= keyEvent.keyCode <= 0x35:
+        if 0x31 <= keyEvent.keyCode <= 0x39:
             return keyEvent.keyCode - 0x31
-        if ord("1") <= keyEvent.charCode <= ord("5"):
+        if keyEvent.keyCode == 0x30:
+            return 9
+        if ord("1") <= keyEvent.charCode <= ord("9"):
             return keyEvent.charCode - ord("1")
+        if keyEvent.charCode == ord("0"):
+            return 9
         return None
 
     @staticmethod
@@ -503,6 +546,35 @@ class PinnedBopomofoTextService(TextService):
                 spans.append((target, target + width))
         return spans
 
+    def _ranked_phrase_options(self, start: int, end: int) -> list[str]:
+        """Return one shared ranking for automatic text and candidate UI.
+
+        Personal phrases win equal spans, followed by Taiwan/frequency-backed
+        phrases and then the conversion engine. Unverified engine guesses are
+        allowed only for the whole buffer, where they represent the engine's
+        sentence-level default; intermediate guesses must be known words.
+        """
+        if start < 0 or end > len(self.segments) or end - start < 2:
+            return []
+        readings = [segment.reading for segment in self.segments[start:end]]
+        personal = self.phrase_store.exact(readings)
+        frequent = self.session.frequent_phrase_candidates(
+            [segment.candidates for segment in self.segments[start:end]]
+        )
+        whole_buffer = start == 0 and end == len(self.segments)
+        engine = [
+            phrase
+            for phrase in self.session.phrase_candidates(readings)
+            if whole_buffer or self.session.is_frequent_phrase(phrase)
+        ]
+        return [
+            phrase
+            for phrase in dict.fromkeys(
+                ([personal] if personal else []) + frequent + engine
+            )
+            if len(phrase) == end - start
+        ]
+
     def _build_candidate_choices(self) -> list[CandidateChoice]:
         target = self._candidate_segment_index()
         if target is None:
@@ -511,14 +583,20 @@ class PinnedBopomofoTextService(TextService):
         phrase_choices: list[CandidateChoice] = []
         displayed: set[str] = set()
         for start, end in self._candidate_phrase_spans(target):
-            readings = [segment.reading for segment in self.segments[start:end]]
-            personal = self.phrase_store.exact(readings)
-            frequent = self.session.frequent_phrase_candidates(
-                [segment.candidates for segment in self.segments[start:end]]
+            current_text = "".join(
+                segment.text for segment in self.segments[start:end]
             )
-            engine = self.session.phrase_candidates(readings)
-            for phrase in ([personal] if personal else []) + frequent + engine:
-                if len(phrase) != end - start or phrase in displayed:
+            for phrase in self._ranked_phrase_options(start, end):
+                # A candidate identical to the text already occupying its
+                # span performs no edit.  Long compositions otherwise fill
+                # the top of the menu with progressively shorter copies of
+                # the sentence (whole sentence, minus one character, ...),
+                # pushing useful word and character alternatives away.
+                if (
+                    len(phrase) != end - start
+                    or phrase == current_text
+                    or phrase in displayed
+                ):
                     continue
                 phrase_choices.append(CandidateChoice(phrase, start, end))
                 displayed.add(phrase)
@@ -537,31 +615,94 @@ class PinnedBopomofoTextService(TextService):
             if len(single_choices) >= self.session.max_candidates:
                 break
 
-        # Keep both editing styles visible on the first five rows: up to three
-        # word choices followed by enough single-character choices to fill the
-        # compact menu. Expanded navigation exposes the remaining candidates.
+        # Keep both editing styles on the first page: personal/common phrases
+        # come first, then the highest-ranked single characters. The second
+        # page is reserved for the less useful long tail.
         front_phrases = phrase_choices[:3]
-        front_single_count = COMPACT_CANDIDATE_COUNT - len(front_phrases)
+        front_single_count = CANDIDATE_PAGE_SIZE - len(front_phrases)
         choices = (
             front_phrases
             + single_choices[:front_single_count]
             + phrase_choices[len(front_phrases) :]
             + single_choices[front_single_count:]
         )
+        # A literal Zhuyin spelling must never disappear onto page two while
+        # editing an uncommitted sentence. Keep it within the first four
+        # positions without displacing the highest-ranked Chinese choice.
+        literal_index = next(
+            (
+                index
+                for index, choice in enumerate(choices)
+                if choice.width == 1 and self._is_literal_bopomofo(choice.text)
+            ),
+            None,
+        )
+        if literal_index is not None and literal_index > 3:
+            literal_choice = choices.pop(literal_index)
+            choices.insert(3, literal_choice)
         return choices[: self.session.max_candidates]
 
     def _visible_candidates(self, candidates: list[str]) -> list[str]:
-        if self.candidate_expanded:
-            return candidates
-        return candidates[:COMPACT_CANDIDATE_COUNT]
+        start = self.candidate_page * CANDIDATE_PAGE_SIZE
+        return candidates[start : start + CANDIDATE_PAGE_SIZE]
+
+    def _absolute_candidate_index(self, page_index: int) -> int:
+        return self.candidate_page * CANDIDATE_PAGE_SIZE + page_index
+
+    @staticmethod
+    def _is_literal_bopomofo(text: str) -> bool:
+        return bool(text) and all(character in BOPOMOFO_TEXT for character in text)
+
+    def _navigate_candidate_menu(self, key_code: int) -> None:
+        """Navigate a ten-item, two-column page without letter labels."""
+        candidates, _ = self._candidate_target()
+        if not candidates:
+            return
+        visible = self._visible_candidates(candidates)
+        cursor = min(self.candidateCursor, len(visible) - 1)
+
+        last_page = max(0, (len(candidates) - 1) // CANDIDATE_PAGE_SIZE)
+        target = cursor
+        if key_code == VK_RIGHT and self.candidate_page < last_page:
+            self.candidate_page += 1
+            visible = self._visible_candidates(candidates)
+            target = 0
+            self.setCandidateList(visible)
+        elif key_code == VK_LEFT and self.candidate_page > 0:
+            self.candidate_page -= 1
+            visible = self._visible_candidates(candidates)
+            target = min(cursor, len(visible) - 1)
+            self.setCandidateList(visible)
+        elif key_code == VK_DOWN:
+            if cursor + 1 < len(visible):
+                target = cursor + 1
+            elif self.candidate_page < last_page:
+                self.candidate_page += 1
+                visible = self._visible_candidates(candidates)
+                target = 0
+                self.setCandidateList(visible)
+        elif key_code == VK_UP:
+            if cursor > 0:
+                target = cursor - 1
+            elif self.candidate_page > 0:
+                self.candidate_page -= 1
+                visible = self._visible_candidates(candidates)
+                target = len(visible) - 1
+                self.setCandidateList(visible)
+        self.setCandidateCursor(max(0, min(len(visible) - 1, target)))
+        self._render_buffer(keep_candidates=True)
 
     def _choose_highlighted_candidate(self, index: int) -> None:
         candidates, _ = self._candidate_target()
+        index = self._absolute_candidate_index(index)
         if index < 0 or index >= len(candidates):
             self._bell("沒有這個候選字")
             return
         if self.reading_open and self.session.candidates:
             selected = candidates[index]
+            if self._is_literal_bopomofo(selected):
+                self._emit_direct_text(selected)
+                return
             self.feedback_store.record(
                 [self.session.preedit], candidates[0], selected
             )
@@ -576,6 +717,14 @@ class PinnedBopomofoTextService(TextService):
         self._render_buffer()
 
     def _apply_candidate_choice(self, choice: CandidateChoice) -> None:
+        if self._is_literal_bopomofo(choice.text):
+            left = "".join(segment.text for segment in self.segments[: choice.start])
+            right = "".join(segment.text for segment in self.segments[choice.end :])
+            self.setCommitString(left + choice.text + right)
+            self._clear_all()
+            self.setCompositionString("")
+            self.setCompositionCursor(0)
+            return
         readings = [
             segment.reading for segment in self.segments[choice.start : choice.end]
         ]
@@ -601,7 +750,7 @@ class PinnedBopomofoTextService(TextService):
 
     def _pin_highlighted_candidate(self) -> None:
         candidates, _ = self._candidate_target()
-        index = self.candidateCursor
+        index = self._absolute_candidate_index(self.candidateCursor)
         if index < 0 or index >= len(candidates):
             self._bell("沒有可固定的候選字")
             return
@@ -623,12 +772,28 @@ class PinnedBopomofoTextService(TextService):
                 for offset, candidate in enumerate(self.candidate_choices)
                 if offset != index
             ]
+        self.candidate_page = 0
         self.setCandidateCursor(0)
         self._render_buffer(keep_candidates=True)
         self.showMessage("已固定為這組注音的第一候選", 2)
 
     def _handle_session_event(self, event: Event) -> None:
         if event.kind is EventKind.UPDATED and self.session.candidates:
+            # libchewing can append extremely rare Han characters even for a
+            # symbol that is not a normal standalone syllable (for example a
+            # lone ㄑ). Its ranked first candidate is the reliable boundary:
+            # Chinese first means auto-accept it; literal Zhuyin first means
+            # show the menu and do not let an obscure tail candidate win.
+            if self._is_literal_bopomofo(self.session.candidates[0]):
+                self.reading_open = True
+                self.candidate_page = 0
+                self.setCandidateList(
+                    self._visible_candidates(self.session.candidates)
+                )
+                self.setCandidateCursor(0)
+                self.setShowCandidates(True)
+                self._render_buffer(keep_candidates=True)
+                return
             self._accept_active_candidate(0)
             return
         self._render_event(event)
@@ -637,10 +802,16 @@ class PinnedBopomofoTextService(TextService):
         if not self.session.candidates or not 0 <= index < len(self.session.candidates):
             self._bell("沒有這個候選字")
             return
+        reading = self.session.preedit
         segment = BufferedSyllable(
-            reading=self.session.preedit,
+            reading=reading,
             candidates=list(self.session.candidates),
             selected=index,
+            # A stored single-character preference remains candidate zero for
+            # isolated input, but must not become a permanent context lock.
+            # Otherwise an old 仙/不 preference blocks the reliable phrase
+            # correction 你先開始下一步吧. A choice made explicitly in this
+            # composition still arrives with advance_focus=True and is locked.
             locked=advance_focus,
         )
         insertion = (
@@ -664,9 +835,10 @@ class PinnedBopomofoTextService(TextService):
         if len(self.segments) < 2:
             return
         readings = [segment.reading for segment in self.segments]
-        phrase = self.session.best_phrase(readings)
-        if phrase and len(phrase) <= len(self.segments):
-            self._apply_ranked_phrase(len(phrase), phrase)
+        whole_options = self._ranked_phrase_options(0, len(self.segments))
+        whole_default = whole_options[0] if whole_options else ""
+        if whole_default:
+            self._apply_ranked_phrase(len(self.segments), whole_default)
 
         personal_length, personal_phrase = self.phrase_store.best_suffix(
             readings
@@ -691,8 +863,8 @@ class PinnedBopomofoTextService(TextService):
         # current span even when libchewing does not expose that word through
         # its alternate-candidate API (對話框 is one such real case).
         engine_match = (
-            (len(phrase), phrase)
-            if phrase and len(phrase) == len(self.segments)
+            (len(self.segments), whole_default)
+            if whole_default
             else None
         )
         lexical_match = frequent_match
@@ -706,9 +878,37 @@ class PinnedBopomofoTextService(TextService):
         # Explicit user selection is the strongest layer, even when it covers
         # a shorter suffix than a bundled phrase.
         if personal_length:
-            self._apply_ranked_phrase(personal_length, personal_phrase)
+            self._apply_ranked_phrase(personal_length, personal_phrase, lock=True)
+        self._apply_live_phonetic_ranking()
 
-    def _apply_ranked_phrase(self, width: int, phrase: str) -> None:
+    def _apply_live_phonetic_ranking(self) -> None:
+        """Re-rank every unlocked word from exact readings while composing."""
+        if len(self.segments) < 2:
+            return
+        readings = [segment.reading for segment in self.segments]
+        text = "".join(segment.text for segment in self.segments)
+        protected = [segment.locked for segment in self.segments]
+        corrected, _ = self.phonetic_corrector.correct(
+            readings,
+            text,
+            protected,
+            self.session.candidates_for_reading,
+            self.session.frequent_phrase_candidates,
+            self.session.dictionary_phrase_candidates,
+            self.session.is_frequent_phrase,
+            allow_fuzzy=False,
+        )
+        for segment, character in zip(self.segments, corrected):
+            if segment.locked or segment.text == character:
+                continue
+            segment.candidates = list(
+                dict.fromkeys([character] + segment.candidates)
+            )[: self.session.max_candidates]
+            segment.selected = 0
+
+    def _apply_ranked_phrase(
+        self, width: int, phrase: str, lock: bool = False
+    ) -> None:
         """Move one phrase to the front without replacing locked segments."""
         if width < 1 or len(phrase) != width or width > len(self.segments):
             return
@@ -719,6 +919,8 @@ class PinnedBopomofoTextService(TextService):
                 dict.fromkeys([suggested] + segment.candidates)
             )[: self.session.max_candidates]
             segment.selected = 0
+            if lock:
+                segment.locked = True
 
     def _render_event(self, event: Event) -> None:
         self._render_buffer()
@@ -737,12 +939,13 @@ class PinnedBopomofoTextService(TextService):
 
         if keep_candidates and self.showCandidates:
             candidates, _ = self._candidate_target()
-            if candidates and 0 <= self.candidateCursor < len(candidates):
-                preview = candidates[self.candidateCursor]
+            candidate_index = self._absolute_candidate_index(self.candidateCursor)
+            if candidates and 0 <= candidate_index < len(candidates):
+                preview = candidates[candidate_index]
                 if self.reading_open and self.session.candidates:
                     active_text = preview
                 elif self.candidate_choices:
-                    choice = self.candidate_choices[self.candidateCursor]
+                    choice = self.candidate_choices[candidate_index]
                     segment_texts[choice.start : choice.end] = list(choice.text)
                 else:
                     target_index = self._candidate_segment_index()
@@ -771,17 +974,40 @@ class PinnedBopomofoTextService(TextService):
             # flag as closed even though Python still thinks it is open.
             self.setShowCandidates(True)
         else:
-            self.candidate_expanded = False
+            self.candidate_page = 0
             self.candidate_choices = []
             self.setCandidateList([])
             self.setShowCandidates(False)
             self.setCandidateCursor(0)
 
-    def _commit_buffer(self, suffix: str = "") -> None:
+    def _commit_buffer(
+        self, suffix: str = "", apply_autocorrect: bool = False
+    ) -> None:
+        # Space, Enter, punctuation, Shift, deactivation, and direct English
+        # insertion all commit through here. Re-apply the shared default so a
+        # correct candidate cannot remain hidden behind Down at send time.
+        self._apply_phrase_ranking()
         text = "".join(segment.text for segment in self.segments)
         if not text:
             self._bell("沒有可以送出的文字")
             return
+        if apply_autocorrect:
+            protected = [
+                segment.locked
+                for segment in self.segments
+                for _ in segment.text
+            ]
+            readings = [segment.reading for segment in self.segments]
+            text, _ = self.phonetic_corrector.correct(
+                readings,
+                text,
+                protected,
+                self.session.candidates_for_reading,
+                self.session.frequent_phrase_candidates,
+                self.session.dictionary_phrase_candidates,
+                self.session.is_frequent_phrase,
+            )
+            text, _ = self.autocorrector.correct(text, protected)
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
@@ -795,7 +1021,7 @@ class PinnedBopomofoTextService(TextService):
         self.focus_index = None
         self.replacement_index = None
         self.reading_open = False
-        self.candidate_expanded = False
+        self.candidate_page = 0
         self.candidate_choices = []
         self.setCandidateList([])
         self.setShowCandidates(False)

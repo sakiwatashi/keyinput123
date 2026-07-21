@@ -7,6 +7,11 @@ from bopomofo_core.taiwan_frequency import TaiwanFrequency
 
 
 class TaiwanFrequencyTests(unittest.TestCase):
+    def test_official_phrase_membership(self) -> None:
+        frequency = TaiwanFrequency()
+        self.assertTrue(frequency.contains_phrase("音感"))
+        self.assertFalse(frequency.contains_phrase("音該"))
+
     def test_bundled_official_index_is_present(self) -> None:
         frequency = TaiwanFrequency()
         self.assertGreaterEqual(frequency.character_count, 4_000)

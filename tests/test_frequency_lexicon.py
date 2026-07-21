@@ -7,6 +7,11 @@ from bopomofo_core.frequency_lexicon import FrequencyLexicon
 
 
 class FrequencyLexiconTests(unittest.TestCase):
+    def test_full_phrase_membership_is_not_limited_to_candidate_tail(self) -> None:
+        lexicon = FrequencyLexicon()
+        self.assertTrue(lexicon.contains("寫程式"))
+        self.assertFalse(lexicon.contains("寫成式"))
+
     def test_bundled_index_is_large_and_contains_common_taiwan_words(self) -> None:
         lexicon = FrequencyLexicon()
         self.assertGreaterEqual(lexicon.entry_count, 100_000)
