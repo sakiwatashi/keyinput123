@@ -22,6 +22,9 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: python -m unittest discover -s tests -v
+      - name: Test native UI preference persistence
+        shell: powershell
+        run: .\tests\native_ui_preference_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1
