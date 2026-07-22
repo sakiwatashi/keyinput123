@@ -43,6 +43,15 @@ class TaiwanFrequencyTests(unittest.TestCase):
                 frequency.rank_characters(["自", "甲", "字", "乙"]),
             )
 
+    def test_reading_dictionary_default_can_be_preserved(self) -> None:
+        frequency = TaiwanFrequency()
+        self.assertEqual(
+            ["運", "員", "均"],
+            frequency.rank_characters(
+                ["運", "均", "員"], preserve_first=True
+            ),
+        )
+
     def test_missing_index_is_optional(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             frequency = TaiwanFrequency(Path(temp_dir) / "missing.json")

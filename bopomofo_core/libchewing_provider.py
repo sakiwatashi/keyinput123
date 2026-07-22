@@ -82,7 +82,16 @@ def add_literal_bopomofo_candidate(
         return candidates
     literal = reading[:-1] if reading.endswith("ˉ") else reading
     if literal in candidates:
-        return candidates
+        current_index = candidates.index(literal)
+        if current_index <= 1:
+            return candidates
+        # Some dictionary rows already contain the raw spelling deep in the
+        # tail. Presence alone is not enough: the UI contract requires it in
+        # the first four, so normalize an existing literal to position two.
+        without_literal = [
+            candidate for candidate in candidates if candidate != literal
+        ]
+        return without_literal[:1] + [literal] + without_literal[1:]
     insert_at = min(1, len(candidates))
     return candidates[:insert_at] + [literal] + candidates[insert_at:]
 
@@ -146,7 +155,11 @@ class LibChewingProvider:
         limit = min(total, MAX_CANDIDATES)
         while self.context.cand_hasNext() and len(results) < limit:
             results.append(self.context.cand_String().decode("utf-8"))
-        results = TAIWAN_FREQUENCY.rank_characters(results)
+        # Dictionary order is reading-aware; global character frequency is
+        # not. Preserve the exact-reading default so a common alternate
+        # pronunciation cannot promote 員 over 運 for ㄩㄣˋ, then use Taiwan
+        # frequency to organize the remaining candidates.
+        results = TAIWAN_FREQUENCY.rank_characters(results, preserve_first=True)
         results = prioritize_common_character(reading, results)
         return add_literal_bopomofo_candidate(reading, results)[:MAX_CANDIDATES]
 

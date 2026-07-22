@@ -19,7 +19,7 @@
 - `bopomofo_core/pinned_store.py`：單一讀音的個人優先字。
 - `bopomofo_core/phrase_store.py`：使用者確認過的 2–12 字詞語。
 - `bopomofo_core/frequency_lexicon.py`：離線高頻詞索引查詢；資料位於 `bopomofo_core/data/`。
-- `bopomofo_core/autocorrect.py`：Enter 送出前的離線高可信錯字修正；規則位於 `bopomofo_core/data/common_typos.json`。
+- `bopomofo_core/autocorrect.py`：產生可見完整句候選的離線高可信錯字修正；規則位於 `bopomofo_core/data/common_typos.json`。
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tests/`：核心與 PIME 整合測試。
@@ -36,18 +36,20 @@ PIME `v1.3.0-stable` 重建；安裝程式只在沒有其他 PIME 模組時套�
 字典查詢補上一聲後的候選，不可單靠 initial／medial／rime 分類判定，因為 `ㄙ`、
 `ㄓ` 等聲母本身也是完整音節。字典候選零是中文字時直接採用；候選零仍是原注音
 時必須開啟原符號第一的選單，不可讓尾端生僻字自動勝出。原注音仍須保留在前四項。
-沒有作用中的音節時，大千聲調鍵直接輸出符號（3=ˇ、6=ˊ、4=ˋ、7=˙）；右側數字
-鍵盤的數字、小數點與 `/ * - +` 必須直接輸出原字元，不可進入注音映射。
+沒有作用中的音節時，大千聲調鍵直接輸出符號（3=ˇ、6=ˊ、4=ˋ、7=˙）；已有未提交
+文字時，聲調與候選中的原始注音須以受保護片段插入同一組字區，不得提交其他片段。
+右側數字鍵盤的數字、小數點與 `/ * - +` 必須直接輸出原字元，不可進入注音映射。
 
-精確注音的常用詞重新排序會即時更新未鎖定的組字內容；模糊讀音與補充錯字規則只在
-使用者按 Enter 確認整段文字時執行，空白鍵送出必須保持原文。規則必須
-等長、精確、高可信且附來源。當次親自選字與個人詞彙所涵蓋的字元須設為保護範圍；
+精確注音、保守模糊讀音與補充錯字規則都必須先產生可見的完整句候選，並即時更新
+未鎖定的組字內容；Enter 不得在送出瞬間暗中改字。原始精確讀音句要保留為後續候選。
+規則必須等長、精確、高可信且附來源。當次親自選字與個人詞彙所涵蓋的字元須設為保護範圍；
 已儲存的單字優先只控制單一讀音排序，不得鎖死整句脈絡。`的／得／地`、`在／再`、合法異形詞等需要語境的
 項目不可加入無條件規則。執行期間不得傳送文字到網路，也不得把自動修正當成個人學習。
 
 完整句預設與候選視窗必須共用 `_ranked_phrase_options()`；開啟候選及任何送出動作前
 都要先執行 `_apply_phrase_ranking()`。禁止新增只在候選視窗可見、但不會同步到組字區
-的另一套第一候選邏輯。方向鍵是改選功能，不是取得系統已知正解的必要步驟。
+的另一套第一候選邏輯，也禁止在 Enter 路徑另外做不可見修正。方向鍵是改選功能，
+不是取得系統已知正解的必要步驟。
 
 ## 修改後必須驗證
 
@@ -55,6 +57,7 @@ PIME `v1.3.0-stable` 重建；安裝程式只在沒有其他 PIME 模組時套�
 python -m unittest discover -s tests -v
 .\build_pime_overlay.ps1
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_adapter_smoke.py
+& 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_all_readings_audit.py
 .\native_ui\build_native_ui.ps1
 .\build_release.ps1
 ```
@@ -90,6 +93,8 @@ Git Bash 使用：
 
 - `tools/build_taiwan_frequency.py` 從教育部字頻／詞頻 CSV 重建台灣預設排序；
   `bopomofo_core/data/taiwan_frequency.json` 是產物，不可手改。
+- 單字候選必須保留 libchewing 讀音字典的第一項，再用全域台灣字頻整理其餘候選；
+  全域字頻不含讀音資訊，不得讓多音字（例如 `員`）覆蓋 `ㄩㄣˋ→運` 等讀音首選。
 - 當次使用者明確選擇永遠最高；儲存的單字優先在孤立讀音中列為候選零，但可靠的
   整詞／整句脈絡可覆蓋它。內建候選先比較詞彙涵蓋的音節數，較短後綴不可
   覆蓋較長完整轉換，涵蓋相同時再依台灣官方字詞頻、其他內建詞庫排序。

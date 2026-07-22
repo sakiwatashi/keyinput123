@@ -42,16 +42,32 @@ class TaiwanFrequency:
             self._characters = {}
             self._buckets = {}
 
-    def rank_characters(self, candidates: list[str]) -> list[str]:
-        """Rank known characters by Taiwan frequency, preserving unknown order."""
+    def rank_characters(
+        self, candidates: list[str], *, preserve_first: bool = False
+    ) -> list[str]:
+        """Rank by Taiwan frequency without losing reading-specific evidence.
+
+        ``candidates`` normally comes from a pronunciation-aware dictionary.
+        Its first entry is therefore stronger evidence than a character's
+        global frequency, which cannot distinguish polyphonic readings such
+        as 員 (usually ㄩㄢˊ, but also present under ㄩㄣˋ). Callers may keep
+        that dictionary default while frequency-sorting the remaining tail.
+        """
+        unique = list(dict.fromkeys(candidates))
+        if not unique:
+            return []
         positions = {candidate: index for index, candidate in enumerate(candidates)}
-        return sorted(
-            dict.fromkeys(candidates),
+        ranked = sorted(
+            unique,
             key=lambda candidate: (
                 -self._characters.get(candidate, 0),
                 positions[candidate],
             ),
         )
+        if not preserve_first:
+            return ranked
+        first = unique[0]
+        return [first] + [candidate for candidate in ranked if candidate != first]
 
     def phrase_candidates(
         self, candidate_columns: list[list[str]], limit: int = 20

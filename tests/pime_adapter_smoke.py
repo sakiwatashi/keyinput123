@@ -21,6 +21,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "dist" / "PIME-overlay" / "python" / "inpu
 from pinned_bopomofo.pinned_bopomofo_ime import PinnedBopomofoTextService
 from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
+from pime_all_readings_audit import audit_all_readings
 
 
 class DummyClient:
@@ -353,20 +354,49 @@ def main() -> None:
         assert service.compositionString == ""
         assert service.segments == []
 
-        # Enter applies only high-confidence offline typo rules. The correction
-        # happens before commit and never writes the surrounding sentence to a
-        # store or network service.
+        # High-confidence offline corrections become visible sentence
+        # candidates before Enter and never write the surrounding sentence to
+        # a store or network service.
         autocorrect_service = PinnedBopomofoTextService(DummyClient())
         autocorrect_sequence = type_readings(
             autocorrect_service,
             ["ㄨㄛˇ", "ㄧㄣˉ", "ㄍㄞˉ", "ㄅㄨˋ", "ㄏㄨㄟˋ", "ㄑㄩˋ"],
             1100,
         )
+        # High-confidence fuzzy correction is a visible sentence candidate,
+        # not an invisible Enter-time mutation. The exact-reading sentence is
+        # retained as candidate two so the user can explicitly override it.
+        assert autocorrect_service.compositionString == "我應該不會去"
+        special_key(autocorrect_service, 0x28, autocorrect_sequence)
+        autocorrect_sequence += 1
+        assert autocorrect_service.candidateList[:2] == [
+            "我應該不會去",
+            "我音該不會去",
+        ]
+        assert all(
+            choice.width == len(autocorrect_service.segments)
+            for choice in autocorrect_service.candidate_choices[:2]
+        )
+        special_key(autocorrect_service, 0x1B, autocorrect_sequence)
+        autocorrect_sequence += 1
         force_composition_text(autocorrect_service, "我音該不會去", locked=False)
         autocorrect_reply = special_key(
             autocorrect_service, 0x0D, autocorrect_sequence
         )
         assert autocorrect_reply["commitString"] == "我應該不會去"
+
+        visible_override = PinnedBopomofoTextService(DummyClient())
+        override_sequence = type_readings(
+            visible_override,
+            ["ㄨㄛˇ", "ㄧㄣˉ", "ㄍㄞˉ", "ㄅㄨˋ", "ㄏㄨㄟˋ", "ㄑㄩˋ"],
+            1200,
+        )
+        special_key(visible_override, 0x28, override_sequence)
+        candidate_selection_key(visible_override, 1, override_sequence + 1)
+        assert visible_override.compositionString == "我音該不會去"
+        assert all(segment.locked for segment in visible_override.segments)
+        override_reply = special_key(visible_override, 0x0D, override_sequence + 2)
+        assert override_reply["commitString"] == "我音該不會去"
 
         # The same decoder also handles an exact ㄧㄥ reading without needing
         # a separate 英該 surface rule.
@@ -435,8 +465,8 @@ def main() -> None:
         )
         assert personal_reply["commitString"] == "因該"
 
-        # The first release deliberately corrects only an explicit Enter
-        # confirmation; ordinary Space preserves exactly what was composed.
+        # An explicitly selected spelling is protected for every commit path;
+        # ordinary Space therefore preserves it exactly as composed.
         literal_service = PinnedBopomofoTextService(DummyClient())
         literal_sequence = type_readings(
             literal_service, ["ㄧㄣˉ", "ㄍㄞˉ"], 1140
@@ -932,6 +962,10 @@ def main() -> None:
         special_key(contextual_service, 0x28, sequence)
         sequence += 1
         assert contextual_service.compositionString == "你先開始下一步吧"
+        assert contextual_service.candidateList[0] == "你先開始下一步吧"
+        assert contextual_service.candidate_choices[0].width == len(
+            contextual_service.segments
+        )
         assert "你先開始夏衣" not in contextual_service.candidateList
         assert "你掀開" not in contextual_service.candidateList
 
@@ -951,28 +985,85 @@ def main() -> None:
         sequence += 1
         assert space_reply["commitString"] == "你先開始下一步吧 "
 
-        # Opening the editor at the end of a sentence must not waste the
-        # highest-ranked slots on no-op copies of the current sentence and
-        # each of its shorter suffix spans.
+        # Opening the editor at the end preserves one whole-sentence choice
+        # for explicit confirmation, but must not waste the remaining slots
+        # on no-op copies of progressively shorter suffix spans.
         no_op_service = PinnedBopomofoTextService(DummyClient())
         no_op_readings = ["ㄨㄛˇ", "ㄧㄥˉ", "ㄍㄞˉ", "ㄅㄨˋ", "ㄏㄨㄟˋ", "ㄑㄩˋ"]
         sequence = type_readings(no_op_service, no_op_readings, sequence)
         special_key(no_op_service, 0x28, sequence)
+        whole_no_ops = []
         for choice in no_op_service.candidate_choices:
             if choice.width == 1:
                 continue
             occupied = "".join(
                 segment.text for segment in no_op_service.segments[choice.start : choice.end]
             )
-            assert choice.text != occupied, (
-                choice,
-                no_op_service.compositionString,
-            )
+            if choice.text == occupied:
+                whole_no_ops.append(choice)
+        assert len(whole_no_ops) == 1, whole_no_ops
+        assert whole_no_ops[0].start == 0
+        assert whole_no_ops[0].end == len(no_op_service.segments)
+        assert no_op_service.candidate_choices[0] == whole_no_ops[0]
 
+        # Global character frequency must not override the dictionary's
+        # reading-aware default: 員 is common overall but normally pronounced
+        # ㄩㄢˊ, so ㄩㄣˋ must remain 運 rather than being promoted to 員.
+        yun_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(yun_service, ["ㄩㄣˋ"], sequence + 1)
+        assert yun_service.compositionString == "運"
+        assert yun_service.segments[0].candidates[0] == "運"
+        assert "員" in yun_service.segments[0].candidates
+
+        # Standalone tones still commit directly when no composition exists.
         standalone_tone = PinnedBopomofoTextService(DummyClient())
         tone_reply = press(standalone_tone, "3", sequence + 1)
         assert tone_reply["commitString"] == "ˇ"
         sequence += 2
+
+        # Inside an existing composition, tones are protected literal
+        # segments. They must not have the Enter-like effect of committing all
+        # previously editable text.
+        buffered_tone = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            buffered_tone, ["ㄋㄧˇ", "ㄏㄠˇ"], sequence
+        )
+        fourth_reply = press(buffered_tone, "4", sequence)
+        sequence += 1
+        assert not fourth_reply.get("commitString")
+        assert buffered_tone.compositionString == "你好ˋ"
+        third_reply = press(buffered_tone, "3", sequence)
+        sequence += 1
+        assert not third_reply.get("commitString")
+        assert buffered_tone.compositionString == "你好ˋˇ"
+        assert all(segment.locked for segment in buffered_tone.segments[-2:])
+        buffered_tone_commit = special_key(buffered_tone, 0x0D, sequence)
+        sequence += 1
+        assert buffered_tone_commit["commitString"] == "你好ˋˇ"
+
+        # Choosing a raw Zhuyin candidate inside a sentence follows the same
+        # non-committing path; a later tone stays in that composition too.
+        buffered_literal = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            buffered_literal, ["ㄋㄧˇ", "ㄢˊ"], sequence
+        )
+        special_key(buffered_literal, 0x28, sequence)
+        sequence += 1
+        literal_index = next(
+            index
+            for index, choice in enumerate(buffered_literal.candidate_choices[:10])
+            if choice.text == "ㄢˊ"
+        )
+        literal_reply = candidate_selection_key(
+            buffered_literal, literal_index, sequence
+        )
+        sequence += 1
+        assert not literal_reply.get("commitString")
+        assert buffered_literal.compositionString == "你ㄢˊ"
+        trailing_tone = press(buffered_literal, "4", sequence)
+        sequence += 1
+        assert not trailing_tone.get("commitString")
+        assert buffered_literal.compositionString == "你ㄢˊˋ"
 
         # Apply the dictionary-driven rule to every initial, medial, and rime,
         # not only examples reported by the user. Valid standalone forms must
@@ -1100,6 +1191,15 @@ def main() -> None:
         candidate_selection_key(sixth_service, 5, sequence + 20)
         assert sixth_service.compositionString == sixth_choice.text
         sequence += 21
+
+        # The full reading space is part of every PIME regression run. This
+        # prevents a future global-frequency change from reintroducing the
+        # same class of polyphonic error one reported reading at a time.
+        reading_audit = audit_all_readings()
+        assert reading_audit["dictionary_readings"] >= 1_400
+        assert reading_audit["distinct_characters_audited"] >= 13_000
+        assert reading_audit["old_global_frequency_promotions_blocked"] >= 400
+        assert reading_audit["errors"] == [], reading_audit["errors"]
 
         # Invalid phonetics make only the configured gentle sound; the old
         # yellow showMessage tooltip must not be present in the PIME reply.

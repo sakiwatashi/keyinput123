@@ -271,7 +271,7 @@ class PinnedBopomofoTextService(TextService):
             if self.session.preedit:
                 if self.reading_open and self.session.candidates:
                     if self._is_literal_bopomofo(self.session.candidates[0]):
-                        self._emit_direct_text(self.session.candidates[0])
+                        self._emit_or_buffer_literal(self.session.candidates[0])
                         return True
                     self._accept_active_candidate(0)
                     return True
@@ -347,13 +347,13 @@ class PinnedBopomofoTextService(TextService):
                 else:
                     self._bell("注音尚未完整")
                     return True
-            self._commit_buffer(apply_autocorrect=True)
+            self._commit_buffer()
             return True
 
         symbol = symbol_for_event(keyEvent.keyCode, keyEvent.charCode)
         if symbol is not None:
             if symbol in TONES and not self.session.preedit:
-                self._emit_direct_text(symbol)
+                self._emit_or_buffer_literal(symbol)
                 return True
             # Ordinary typing continues at the end unless Backspace left an
             # explicit insertion gap inside the composition.
@@ -468,6 +468,49 @@ class PinnedBopomofoTextService(TextService):
         """Replace an unfinished reading with the requested punctuation."""
         self._emit_direct_text(punctuation)
 
+    def _emit_or_buffer_literal(self, text: str) -> None:
+        """Keep literal Bopomofo inside an existing editable composition."""
+        if self.segments:
+            self._buffer_literal_text(text)
+        else:
+            self._emit_direct_text(text)
+
+    def _buffer_literal_text(
+        self, text: str, start: int | None = None, end: int | None = None
+    ) -> None:
+        """Insert protected literal symbols without committing other text.
+
+        One buffer segment is kept per Unicode symbol so readings, protection
+        masks, and rendered text remain aligned even for a spelling such as
+        ㄢˊ. Literal segments are locked because phrase ranking must never
+        silently turn a deliberately selected phonetic spelling into Hanzi.
+        """
+        if not text:
+            return
+        if start is None:
+            if self.replacement_index is not None:
+                start = self.replacement_index
+            elif self.focus_index is not None:
+                start = self.focus_index + 1
+            else:
+                start = len(self.segments)
+        if end is None:
+            end = start
+        literal_segments = [
+            BufferedSyllable(
+                reading=character,
+                candidates=[character],
+                locked=True,
+            )
+            for character in text
+        ]
+        self.segments[start:end] = literal_segments
+        self.session.clear()
+        self.replacement_index = None
+        self.reading_open = False
+        self.focus_index = start + len(literal_segments) - 1
+        self._render_buffer()
+
     def _emit_direct_text(self, text: str) -> None:
         """Insert non-Bopomofo text at the active caret and finish composition."""
         if self.replacement_index is not None:
@@ -549,8 +592,10 @@ class PinnedBopomofoTextService(TextService):
     def _ranked_phrase_options(self, start: int, end: int) -> list[str]:
         """Return one shared ranking for automatic text and candidate UI.
 
-        Personal phrases win equal spans, followed by Taiwan/frequency-backed
-        phrases and then the conversion engine. Unverified engine guesses are
+        Personal phrases win equal spans. For the whole buffer, conservative
+        reading-aware and exact typo corrections are then promoted ahead of
+        their uncorrected source sentences. Taiwan/frequency-backed phrases
+        follow, then the conversion engine. Unverified engine guesses are
         allowed only for the whole buffer, where they represent the engine's
         sentence-level default; intermediate guesses must be known words.
         """
@@ -567,10 +612,45 @@ class PinnedBopomofoTextService(TextService):
             for phrase in self.session.phrase_candidates(readings)
             if whole_buffer or self.session.is_frequent_phrase(phrase)
         ]
+        corrected: list[str] = []
+        current_text = "".join(
+            segment.text for segment in self.segments[start:end]
+        )
+        if whole_buffer:
+            protected = [segment.locked for segment in self.segments[start:end]]
+            # Re-decode both the visible text and the exact-reading sources.
+            # On the next render the visible text may already be corrected;
+            # retaining the engine sources here makes the corrected sentence
+            # reproducible as candidate zero instead of a one-frame mutation.
+            for source in dict.fromkeys([current_text] + frequent + engine):
+                if len(source) != end - start:
+                    continue
+                suggestion, phonetic_changes = self.phonetic_corrector.correct(
+                    readings,
+                    source,
+                    protected,
+                    self.session.candidates_for_reading,
+                    self.session.frequent_phrase_candidates,
+                    self.session.dictionary_phrase_candidates,
+                    self.session.is_frequent_phrase,
+                )
+                suggestion, typo_changes = self.autocorrector.correct(
+                    suggestion, protected
+                )
+                if (
+                    suggestion != source
+                    and (phonetic_changes or typo_changes)
+                    and suggestion not in corrected
+                ):
+                    corrected.append(suggestion)
         return [
             phrase
             for phrase in dict.fromkeys(
-                ([personal] if personal else []) + frequent + engine
+                ([personal] if personal else [])
+                + corrected
+                + frequent
+                + engine
+                + ([current_text] if corrected else [])
             )
             if len(phrase) == end - start
         ]
@@ -587,14 +667,16 @@ class PinnedBopomofoTextService(TextService):
                 segment.text for segment in self.segments[start:end]
             )
             for phrase in self._ranked_phrase_options(start, end):
-                # A candidate identical to the text already occupying its
-                # span performs no edit.  Long compositions otherwise fill
-                # the top of the menu with progressively shorter copies of
-                # the sentence (whole sentence, minus one character, ...),
-                # pushing useful word and character alternatives away.
+                # Keep exactly one whole-buffer choice even when automatic
+                # ranking has already adopted it.  This preserves sentence
+                # selection/confirmation in the candidate editor.  Shorter
+                # no-op spans are still noise: without this distinction a
+                # long composition fills the menu with the sentence, minus
+                # one character, minus two characters, and so on.
+                whole_buffer = start == 0 and end == len(self.segments)
                 if (
                     len(phrase) != end - start
-                    or phrase == current_text
+                    or (phrase == current_text and not whole_buffer)
                     or phrase in displayed
                 ):
                     continue
@@ -701,7 +783,7 @@ class PinnedBopomofoTextService(TextService):
         if self.reading_open and self.session.candidates:
             selected = candidates[index]
             if self._is_literal_bopomofo(selected):
-                self._emit_direct_text(selected)
+                self._emit_or_buffer_literal(selected)
                 return
             self.feedback_store.record(
                 [self.session.preedit], candidates[0], selected
@@ -718,12 +800,15 @@ class PinnedBopomofoTextService(TextService):
 
     def _apply_candidate_choice(self, choice: CandidateChoice) -> None:
         if self._is_literal_bopomofo(choice.text):
-            left = "".join(segment.text for segment in self.segments[: choice.start])
-            right = "".join(segment.text for segment in self.segments[choice.end :])
-            self.setCommitString(left + choice.text + right)
-            self._clear_all()
-            self.setCompositionString("")
-            self.setCompositionCursor(0)
+            if choice.start == 0 and choice.end == len(self.segments):
+                # Preserve the established standalone behavior: choosing raw
+                # Zhuyin with no surrounding editable text commits it at once.
+                self.setCommitString(choice.text)
+                self._clear_all()
+                self.setCompositionString("")
+                self.setCompositionCursor(0)
+            else:
+                self._buffer_literal_text(choice.text, choice.start, choice.end)
             return
         readings = [
             segment.reading for segment in self.segments[choice.start : choice.end]
@@ -980,9 +1065,7 @@ class PinnedBopomofoTextService(TextService):
             self.setShowCandidates(False)
             self.setCandidateCursor(0)
 
-    def _commit_buffer(
-        self, suffix: str = "", apply_autocorrect: bool = False
-    ) -> None:
+    def _commit_buffer(self, suffix: str = "") -> None:
         # Space, Enter, punctuation, Shift, deactivation, and direct English
         # insertion all commit through here. Re-apply the shared default so a
         # correct candidate cannot remain hidden behind Down at send time.
@@ -991,23 +1074,6 @@ class PinnedBopomofoTextService(TextService):
         if not text:
             self._bell("沒有可以送出的文字")
             return
-        if apply_autocorrect:
-            protected = [
-                segment.locked
-                for segment in self.segments
-                for _ in segment.text
-            ]
-            readings = [segment.reading for segment in self.segments]
-            text, _ = self.phonetic_corrector.correct(
-                readings,
-                text,
-                protected,
-                self.session.candidates_for_reading,
-                self.session.frequent_phrase_candidates,
-                self.session.dictionary_phrase_candidates,
-                self.session.is_frequent_phrase,
-            )
-            text, _ = self.autocorrector.correct(text, protected)
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")

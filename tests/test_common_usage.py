@@ -56,6 +56,15 @@ class CommonUsageTests(unittest.TestCase):
                 self.assertEqual("安", ranked[0])
                 self.assertEqual(literal, ranked[1])
 
+        # A dictionary-provided literal in the long tail must be moved, not
+        # mistaken for an already-visible candidate.
+        self.assertEqual(
+            ["安", "ㄢ", "鞍", "庵"],
+            add_literal_bopomofo_candidate(
+                "ㄢˉ", ["安", "鞍", "庵", "ㄢ"]
+            ),
+        )
+
     def test_bu_phrases_are_forced_to_common_usage(self) -> None:
         self.assertEqual(
             "我不要",
