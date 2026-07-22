@@ -83,6 +83,7 @@ class PhoneticCorrector:
         known_phrase_lookup: KnownPhraseLookup | None = None,
         phrase_validator: PhraseValidator | None = None,
         allow_fuzzy: bool = True,
+        replacement_phrase_lookup: KnownPhraseLookup | None = None,
     ) -> tuple[str, list[PhoneticCorrection]]:
         if len(readings) != len(text) or len(protected) != len(text):
             raise ValueError("readings, text, and protection mask must align")
@@ -126,7 +127,16 @@ class PhoneticCorrector:
                     matched = True
                     break
 
+                span_readings = list(readings[start:end])
                 exact_phrases = phrase_lookup(exact_columns[start:end])
+                evidence_lookup = (
+                    replacement_phrase_lookup or known_phrase_lookup
+                )
+                if evidence_lookup is not None:
+                    known_exact = set(evidence_lookup(span_readings))
+                    exact_phrases = [
+                        phrase for phrase in exact_phrases if phrase in known_exact
+                    ]
                 # A known phrase matching the user's current text is valid,
                 # even if another phrase has a higher raw corpus frequency.
                 if current in exact_phrases:
@@ -138,6 +148,24 @@ class PhoneticCorrector:
                     fuzzy = False
                 elif allow_fuzzy:
                     fuzzy_phrases = phrase_lookup(expanded_columns[start:end])
+                    if evidence_lookup is not None:
+                        # Fuzzy correction is deliberately limited to one
+                        # changed phonetic slot. Validate every proposed word
+                        # against the exact phrase engine for that nearby
+                        # reading, rather than trusting text-only corpus data.
+                        known_fuzzy: set[str] = set()
+                        for offset, reading in enumerate(span_readings):
+                            for variant in reading_variants(reading)[1:]:
+                                variant_readings = list(span_readings)
+                                variant_readings[offset] = variant
+                                known_fuzzy.update(
+                                    evidence_lookup(variant_readings)
+                                )
+                        fuzzy_phrases = [
+                            phrase
+                            for phrase in fuzzy_phrases
+                            if phrase in known_fuzzy
+                        ]
                     if not fuzzy_phrases:
                         continue
                     replacement = fuzzy_phrases[0]

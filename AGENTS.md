@@ -38,7 +38,10 @@ When PIME is installed, also run:
   remove these behaviors without an explicit user request.
 - Candidate editing must offer and atomically apply common/personal phrases
   spanning 2-12 syllables while keeping high-frequency single-character and
-  literal-Zhuyin choices available on the first ten-item page.
+  literal-Zhuyin choices available on the first ten-item page. At the end of
+  the composition, phrase/sentence choices lead. After the caret moves inside
+  the composition, the single character to its right must lead, so candidate
+  1 locks only that syllable and advances instead of confirming the sentence.
 - Automatic composition and the candidate editor share
   `_ranked_phrase_options()`. Conservative fuzzy-reading and exact typo
   corrections must enter that function as visible whole-sentence candidates;
@@ -60,6 +63,11 @@ When PIME is installed, also run:
   default, then uses global Taiwan frequency for the remaining tail. Global
   frequency has no pronunciation information and must never promote a common
   alternate-reading character such as 員 over 運 for ㄩㄣˋ.
+- Text/weight-only frequency indexes are search aids, not pronunciation
+  evidence. Before a corpus phrase or fuzzy-reading correction changes live
+  text, validate the complete span through `phrase_candidates(readings)`.
+  Character-column membership alone must never let an alternate reading
+  borrow an unrelated word (for example 貝殼 for ㄅㄟˋ ㄑㄩㄝˋ).
 - Autocorrection is conservative, offline, and visible before commit. Apply
   only exact, same-length high-confidence rules from `data/common_typos.json`
   as whole-sentence candidates. A currently selected candidate or a learned
@@ -73,9 +81,10 @@ When PIME is installed, also run:
   whole-sentence candidates before Enter. Surface variants such as 音該/英該
   must not be enumerated as separate rules, and a valid exact-reading phrase
   must be preserved as an alternate candidate.
-- Activation, a Windows keyboard-close status, and forced focus termination
-  restore the profile to keyboard-open Bopomofo mode. Password fields and apps
-  that explicitly disable IMEs remain under Windows control.
+- Activation and forced focus termination reset only the profile's internal
+  Shift toggle. Respect the TSF keyboard-open state supplied by the host;
+  never reopen a compartment after an app closes it. This prevents games and
+  secure/custom controls from entering an open/close feedback loop.
 - Numpad 0-9, decimal, divide, multiply, subtract, and add always emit their
   literal ASCII characters and never Bopomofo or candidate numbers.
   Shift+A-Z and Shift punctuation replace only an unfinished active syllable,
@@ -115,8 +124,12 @@ When PIME is installed, also run:
 - Candidate font, grid width, labels, and navigation can be changed through
   PIME's Python protocol. The authorized native style lives under `native_ui/`
   and is built from the exact bundled PIME `v1.3.0-stable` source. Install it
-  only when PIME has no unrelated modules, preserve the original DLLs, and
-  restore them only when the installed hashes still match our build.
+  only through the explicit `-EnableUnsignedNativeUi` opt-in, only when PIME
+  has no unrelated modules, preserve the original DLLs, and restore them only
+  when the installed hashes still match our build. Fresh installs keep the
+  signed DLLs for game compatibility. Once opted in, persist that preference
+  across normal and EXE updates; never silently restore the signed UI during
+  a Python-layer update. `-DisableUnsignedNativeUi` is the explicit rollback.
 
 Run `./build_release.ps1` for a distributable installer. Update all version
 locations together when cutting a new version.

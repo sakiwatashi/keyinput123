@@ -44,6 +44,7 @@ Section "安裝智慧優先注音" SEC_MAIN
     SetShellVarContext current
     SetOutPath "$INSTDIR"
     File "install.ps1"
+    File "native_ui_preference.ps1"
     File "uninstall.ps1"
     File "..\release-staging\THIRD_PARTY_NOTICES.txt"
     File "..\release-staging\PIME-LICENSE.txt"

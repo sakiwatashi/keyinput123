@@ -67,6 +67,26 @@ class CandidateSession:
             : self.max_candidates
         ]
 
+    def validated_frequent_phrase_candidates(
+        self, readings: list[str], candidate_columns: list[list[str]]
+    ) -> list[str]:
+        """Return corpus phrases proven to match the complete readings.
+
+        The expanded frequency index stores text and weights, but not a
+        phrase's pronunciation. A character-by-character membership check is
+        therefore only a broad search and can confuse alternate readings
+        (for example, matching 貝殼 to ㄅㄟˋ ㄑㄩㄝˋ). Require the phrase engine's
+        exact-reading evidence before a corpus match may affect live text.
+        """
+        exact_phrases = set(self.phrase_candidates(readings))
+        if not exact_phrases:
+            return []
+        return [
+            phrase
+            for phrase in self.frequent_phrase_candidates(candidate_columns)
+            if phrase in exact_phrases
+        ]
+
     def is_frequent_phrase(self, phrase: str) -> bool:
         validator = getattr(self.provider, "is_frequent_phrase", None)
         return bool(validator(phrase)) if validator is not None else False

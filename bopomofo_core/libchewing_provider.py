@@ -61,7 +61,9 @@ def prioritize_common_character(reading: str, candidates: list[str]) -> list[str
         "ㄅㄨˋ": "不",
         "ㄉㄜ˙": "的",
         "ㄋㄚˋ": "那",
+        "ㄕˋ": "是",
         "ㄗˋ": "字",
+        "ㄗㄨㄛˋ": "做",
     }.get(reading)
     if preferred is None or preferred not in candidates:
         return candidates

@@ -41,6 +41,16 @@ class CommonUsageTests(unittest.TestCase):
             prioritize_common_character("ㄉㄜ˙", ["得", "地", "的"]),
         )
 
+    def test_zuo_and_shi_default_to_everyday_verbs(self) -> None:
+        self.assertEqual(
+            ["做", "作", "座"],
+            prioritize_common_character("ㄗㄨㄛˋ", ["作", "座", "做"]),
+        )
+        self.assertEqual(
+            ["是", "市", "事"],
+            prioritize_common_character("ㄕˋ", ["市", "是", "事"]),
+        )
+
     def test_complete_reading_exposes_literal_zhuyin_without_replacing_default(self) -> None:
         for reading, literal in (
             ("ㄢˉ", "ㄢ"),

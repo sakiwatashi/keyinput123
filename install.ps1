@@ -1,20 +1,33 @@
 param(
-    [switch]$Elevated
+    [switch]$Elevated,
+    [switch]$EnableUnsignedNativeUi,
+    [switch]$DisableUnsignedNativeUi
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $scriptPath = $MyInvocation.MyCommand.Path
 
+if ($EnableUnsignedNativeUi -and $DisableUnsignedNativeUi) {
+    throw "EnableUnsignedNativeUi and DisableUnsignedNativeUi cannot be used together."
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $process = Start-Process -FilePath "powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList @(
+    $elevatedArguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", ('"' + $scriptPath + '"'),
         "-Elevated"
     )
+    if ($EnableUnsignedNativeUi) {
+        $elevatedArguments += "-EnableUnsignedNativeUi"
+    }
+    if ($DisableUnsignedNativeUi) {
+        $elevatedArguments += "-DisableUnsignedNativeUi"
+    }
+    $process = Start-Process -FilePath "powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList $elevatedArguments
     if ($process.ExitCode -ne 0) {
         throw "Installation failed with exit code $($process.ExitCode)."
     }
@@ -47,7 +60,9 @@ try {
     New-Item -ItemType Directory -Path $resolvedStaging -Force | Out-Null
     Copy-Item -LiteralPath $overlayRoot -Destination (Join-Path $resolvedStaging "overlay") -Recurse -Force
     Copy-Item -LiteralPath $pimeInstaller -Destination $resolvedStaging -Force
-    & $formalInstaller -PayloadRoot $resolvedStaging
+    & $formalInstaller -PayloadRoot $resolvedStaging `
+        -EnableUnsignedNativeUi:$EnableUnsignedNativeUi `
+        -DisableUnsignedNativeUi:$DisableUnsignedNativeUi
 }
 finally {
     Set-Location -LiteralPath $env:TEMP

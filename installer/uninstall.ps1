@@ -77,6 +77,14 @@ public static class SmartPriorityNativeMethods {
                 $expectedHash = $nativeHashes.$architecture
                 if ((Test-Path -LiteralPath $targetDll) -and
                     (Test-Path -LiteralPath $backupDll) -and
+                    (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash -eq
+                        (Get-FileHash -Algorithm SHA256 -LiteralPath $backupDll).Hash) {
+                    # A prior safe reinstall already restored PIME's signed
+                    # DLL. There is nothing left to overwrite.
+                    continue
+                }
+                elseif ((Test-Path -LiteralPath $targetDll) -and
+                    (Test-Path -LiteralPath $backupDll) -and
                     $expectedHash -and
                     (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash -eq $expectedHash) {
                     try {
@@ -160,6 +168,11 @@ public static class SmartPriorityNativeMethods {
     if ((Test-Path -LiteralPath $shortcutRoot) -and
         -not (Get-ChildItem -LiteralPath $shortcutRoot -Force)) {
         Remove-Item -LiteralPath $shortcutRoot -Force
+    }
+
+    $nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
+    if (Test-Path -LiteralPath $nativePreferencePath) {
+        Remove-Item -LiteralPath $nativePreferencePath -Force
     }
 
     # Remove only this language profile. PIME and every other PIME input

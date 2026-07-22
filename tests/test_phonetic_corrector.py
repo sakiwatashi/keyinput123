@@ -24,8 +24,16 @@ class PhoneticCorrectorTests(unittest.TestCase):
                 and all(character in column for character, column in zip(phrase, columns))
             ]
 
+        def known_phrase_lookup(readings: list[str]) -> list[str]:
+            known = {
+                ("ㄧㄥˉ", "ㄍㄞˉ"): ["應該"],
+                ("ㄧㄣˉ", "ㄍㄢˇ"): ["音感"],
+            }
+            return known.get(tuple(readings), [])
+
         self.candidate_lookup = candidate_lookup
         self.phrase_lookup = phrase_lookup
+        self.known_phrase_lookup = known_phrase_lookup
         self.corrector = PhoneticCorrector()
 
     def correct(self, readings, text, protected=None):
@@ -35,6 +43,7 @@ class PhoneticCorrectorTests(unittest.TestCase):
             protected or [False] * len(text),
             self.candidate_lookup,
             self.phrase_lookup,
+            self.known_phrase_lookup,
         )
 
     def test_uses_readings_instead_of_enumerating_wrong_characters(self) -> None:
@@ -70,6 +79,49 @@ class PhoneticCorrectorTests(unittest.TestCase):
             allow_fuzzy=False,
         )
         self.assertEqual(("音該", []), (corrected, changes))
+
+    def test_text_only_word_cannot_borrow_an_unrelated_pronunciation(self) -> None:
+        def candidate_lookup(reading: str) -> list[str]:
+            return {
+                "ㄅㄟˋ": ["被", "貝"],
+                "ㄑㄩㄝˋ": ["卻", "殼"],
+                "ㄎㄜˊ": ["殼"],
+            }.get(reading, [])
+
+        def phrase_lookup(columns: list[list[str]]) -> list[str]:
+            return [
+                phrase
+                for phrase in ["貝殼"]
+                if all(character in column for character, column in zip(phrase, columns))
+            ]
+
+        def known_phrase_lookup(readings: list[str]) -> list[str]:
+            return {
+                ("ㄅㄟˋ", "ㄑㄩㄝˋ"): ["被卻"],
+                ("ㄅㄟˋ", "ㄎㄜˊ"): ["貝殼"],
+            }.get(tuple(readings), [])
+
+        wrong = self.corrector.correct(
+            ["ㄅㄟˋ", "ㄑㄩㄝˋ"],
+            "貝卻",
+            [False, False],
+            candidate_lookup,
+            phrase_lookup,
+            known_phrase_lookup,
+            allow_fuzzy=False,
+        )
+        correct = self.corrector.correct(
+            ["ㄅㄟˋ", "ㄎㄜˊ"],
+            "被殼",
+            [False, False],
+            candidate_lookup,
+            phrase_lookup,
+            known_phrase_lookup,
+            allow_fuzzy=False,
+        )
+        self.assertEqual(("貝卻", []), wrong)
+        self.assertEqual("貝殼", correct[0])
+        self.assertFalse(correct[1][0].used_fuzzy_reading)
 
     def test_long_valid_word_blocks_shorter_overlapping_rewrite(self) -> None:
         columns = {

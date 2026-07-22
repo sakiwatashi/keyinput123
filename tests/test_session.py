@@ -75,7 +75,7 @@ class CandidateSessionTests(unittest.TestCase):
                 return "樹葉" if readings == ["ㄕㄨˋ", "ㄧㄝˋ"] else ""
 
             def phrase_candidates(self, readings):
-                return ["樹葉", "樹液", "數夜"]
+                return ["樹葉", "樹液"]
 
             def dictionary_phrase_candidates(self, readings):
                 return ["樹葉", "樹液"]
@@ -86,7 +86,7 @@ class CandidateSessionTests(unittest.TestCase):
         session = CandidateSession(ContextualProvider())
         self.assertEqual("樹葉", session.best_phrase(["ㄕㄨˋ", "ㄧㄝˋ"]))
         self.assertEqual(
-            ["樹葉", "樹液", "數夜"],
+            ["樹葉", "樹液"],
             session.phrase_candidates(["ㄕㄨˋ", "ㄧㄝˋ"]),
         )
         self.assertEqual(
@@ -96,6 +96,12 @@ class CandidateSessionTests(unittest.TestCase):
         self.assertEqual(
             ["樹葉", "數夜"],
             session.frequent_phrase_candidates([["樹", "數"], ["葉", "夜"]]),
+        )
+        self.assertEqual(
+            ["樹葉"],
+            session.validated_frequent_phrase_candidates(
+                ["ㄕㄨˋ", "ㄧㄝˋ"], [["樹", "數"], ["葉", "夜"]]
+            ),
         )
 
     def test_phrase_ranking_is_optional(self) -> None:
@@ -107,6 +113,12 @@ class CandidateSessionTests(unittest.TestCase):
         )
         self.assertEqual(
             [], session.frequent_phrase_candidates([["樹"], ["葉"]])
+        )
+        self.assertEqual(
+            [],
+            session.validated_frequent_phrase_candidates(
+                ["ㄕㄨˋ", "ㄧㄝˋ"], [["樹"], ["葉"]]
+            ),
         )
 
     def test_user_pin_outranks_the_bundled_default(self) -> None:

@@ -18,6 +18,10 @@ and rebuilds only `PIMETextService.dll`.
 Run `build_native_ui.ps1` on Windows with Visual Studio 2022 C++ tools to
 reproduce `bin/x86/PIMETextService.dll` and `bin/x64/PIMETextService.dll`.
 
-The installer applies these DLLs only when no other PIME input-method modules
-are present. It backs up the original shared DLLs and restores them during
-uninstall, so an unrelated PIME installation is never silently restyled.
+These locally built DLLs are not code-signed and are therefore not installed
+by default. The source installer accepts the explicit
+`-EnableUnsignedNativeUi` switch when no other PIME input-method modules are
+present. It backs up the original shared DLLs and remembers the opt-in across
+normal and EXE updates. `-DisableUnsignedNativeUi` or uninstall explicitly
+restores the signed PIME binaries when game or anti-cheat compatibility is
+more important than the custom appearance.

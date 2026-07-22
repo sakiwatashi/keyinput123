@@ -1,17 +1,132 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [string]$PayloadRoot
+    [string]$PayloadRoot,
+    [switch]$EnableUnsignedNativeUi,
+    [switch]$DisableUnsignedNativeUi
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "native_ui_preference.ps1")
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
 $logPath = Join-Path $logRoot "install.log"
 $nativeStateRoot = Join-Path $logRoot "native-state"
+$nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
 $installedPimeThisRun = $false
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 Start-Transcript -LiteralPath $logPath -Force | Out-Null
+
+function Restore-OriginalPimeTextService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PimeRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$StateRoot
+    )
+
+    $nativeMarker = Join-Path $StateRoot "native-ui.json"
+    $backupRoot = Join-Path $StateRoot "backup"
+    $pendingRoot = Join-Path $StateRoot "pending"
+    if (-not (Test-Path -LiteralPath $nativeMarker) -or
+        -not (Test-Path -LiteralPath $backupRoot)) {
+        return
+    }
+
+    $nativeHashes = Get-Content -LiteralPath $nativeMarker -Raw -Encoding UTF8 |
+        ConvertFrom-Json
+    $nativeStateCanBeRemoved = $true
+    $restoreScheduled = $false
+    if (-not ("SmartPriorityNativeMethods" -as [type])) {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class SmartPriorityNativeMethods {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool MoveFileEx(
+        string existingFile,
+        string newFile,
+        int flags
+    );
+}
+"@
+    }
+
+    foreach ($architecture in @("x86", "x64")) {
+        $targetDll = Join-Path $PimeRoot "$architecture\PIMETextService.dll"
+        $backupDll = Join-Path $backupRoot "$architecture\PIMETextService.dll"
+        $pendingDll = Join-Path $pendingRoot "$architecture\PIMETextService.dll"
+        $expectedCustomHash = $nativeHashes.$architecture
+        if (-not (Test-Path -LiteralPath $targetDll) -or
+            -not (Test-Path -LiteralPath $backupDll)) {
+            $nativeStateCanBeRemoved = $false
+            continue
+        }
+
+        $backupSignature = Get-AuthenticodeSignature -LiteralPath $backupDll
+        if ($backupSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            throw "Refusing to restore an unsigned or invalid $architecture PIME backup."
+        }
+        $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash
+        $backupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupDll).Hash
+        if ($targetHash -eq $backupHash) {
+            continue
+        }
+
+        if ($expectedCustomHash -and $targetHash -eq $expectedCustomHash) {
+            try {
+                Copy-Item -LiteralPath $backupDll -Destination $targetDll -Force
+            }
+            catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+                # The TSF DLL is normally loaded by desktop and game clients.
+                # Keep a persistent signed source and replace it at reboot.
+                $restoreDll = Join-Path $StateRoot "restore\$architecture\PIMETextService.dll"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $restoreDll) -Force | Out-Null
+                Copy-Item -LiteralPath $backupDll -Destination $restoreDll -Force
+                $scheduled = [SmartPriorityNativeMethods]::MoveFileEx(
+                    $restoreDll,
+                    $targetDll,
+                    0x4 -bor 0x1
+                )
+                if (-not $scheduled) {
+                    $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    throw "Unable to schedule the $architecture signed PIME DLL restore (Win32 $win32Error)."
+                }
+                $nativeStateCanBeRemoved = $false
+                $restoreScheduled = $true
+            }
+            continue
+        }
+
+        if ($nativeHashes.($architecture + "Pending") -and
+            (Test-Path -LiteralPath $pendingDll)) {
+            # Removing the source cancels an unsigned replacement that Windows
+            # has not performed yet.
+            Remove-Item -LiteralPath $pendingDll -Force
+            if ($targetHash -ne $backupHash) {
+                $nativeStateCanBeRemoved = $false
+            }
+            continue
+        }
+
+        # Another product changed the shared DLL. Preserve every backup and
+        # avoid overwriting an unknown installation.
+        $nativeStateCanBeRemoved = $false
+    }
+
+    if ($nativeStateCanBeRemoved -and (Test-Path -LiteralPath $StateRoot)) {
+        Remove-Item -LiteralPath $StateRoot -Recurse -Force
+        Write-Output "Restored the signed PIME text-service DLLs."
+    }
+    elseif ($restoreScheduled) {
+        Write-Output "The signed PIME text-service DLL restore will finish after Windows restarts."
+    }
+    else {
+        Write-Output "Preserved the native UI backup because the shared PIME DLL was changed by another product."
+    }
+}
 
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -130,9 +245,23 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "The module compile check failed." }
     }
 
-    # The native candidate window is shared by every PIME profile. Apply our
-    # modern UI only when this PIME installation contains no unrelated input
-    # methods. Preserve the original DLLs so uninstall can restore them.
+    # A fresh installation keeps PIME's signed DLL. Once a user explicitly
+    # enables the custom UI, remember that choice across source, EXE, and AI-
+    # assisted updates so a routine Python-layer update cannot silently revert
+    # the appearance. The signed UI remains explicitly recoverable.
+    $useUnsignedNativeUi = Resolve-SmartPriorityNativeUiPreference `
+        -PreferencePath $nativePreferencePath `
+        -PimeRoot $resolvedRoot `
+        -StateRoot $nativeStateRoot `
+        -EnableUnsignedNativeUi:$EnableUnsignedNativeUi `
+        -DisableUnsignedNativeUi:$DisableUnsignedNativeUi
+    if (-not $useUnsignedNativeUi) {
+        Restore-OriginalPimeTextService -PimeRoot $resolvedRoot -StateRoot $nativeStateRoot
+    }
+
+    # Apply the optional native candidate window only when explicitly enabled
+    # and when this PIME installation contains no unrelated input methods.
+    # Preserve the original DLLs so a safe reinstall/uninstall can restore them.
     $pythonMethods = Join-Path $resolvedRoot "python\input_methods"
     $nodeMethods = Join-Path $resolvedRoot "node\input_methods"
     $otherPythonModules = @(
@@ -144,10 +273,14 @@ try {
     )
     $nativeUiPayload = Join-Path $PayloadRoot "overlay\native_ui\bin"
     $canInstallNativeUi = (
+        $useUnsignedNativeUi -and
         $otherPythonModules.Count -eq 0 -and $otherNodeModules.Count -eq 0 -and
         (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x86\PIMETextService.dll")) -and
         (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x64\PIMETextService.dll"))
     )
+    if ($useUnsignedNativeUi -and -not $canInstallNativeUi) {
+        throw "The remembered custom candidate UI cannot be installed because its payload is missing or unrelated PIME modules are present."
+    }
     if ($canInstallNativeUi) {
         $backupRoot = Join-Path $nativeStateRoot "backup"
         $pendingRoot = Join-Path $nativeStateRoot "pending"
@@ -228,6 +361,8 @@ public static class SmartPriorityNativeMethods {
             Write-Output "The modern candidate UI will finish installing after the next Windows restart."
         }
     }
+    Save-SmartPriorityNativeUiPreference `
+        -PreferencePath $nativePreferencePath -Enabled $useUnsignedNativeUi
 
     $x86Dll = Join-Path $resolvedRoot "x86\PIMETextService.dll"
     $x64Dll = Join-Path $resolvedRoot "x64\PIMETextService.dll"

@@ -41,7 +41,9 @@ SHIFT_PUNCTUATION = {
     0xBD: "——",  # Shift+-
     0xBE: "。",  # Shift+.
     0xBF: "？",  # Shift+/
+    0xC0: "～",  # Shift+`
     0xDB: "『",  # Shift+[
+    0xDC: "｜",  # Shift+\
     0xDD: "』",  # Shift+]
 }
 VK_OEM_QUOTE = 0xDE
@@ -122,7 +124,11 @@ class PinnedBopomofoTextService(TextService):
 
     def onActivate(self):
         super().onActivate()
-        self._restore_chinese_keyboard()
+        # Reset our field-local Shift toggle, but respect the keyboard-open
+        # state supplied by TSF. Games and secure/custom controls may
+        # deliberately close their input context; forcing it open here can
+        # create an open/close feedback loop with the application.
+        self._reset_internal_chinese_mode()
         # Each page exposes exactly ten numeric selection keys. The native UI
         # fills its two columns from top to bottom: 1-5 on the left and 6-0 on
         # the right. Keeping the native list and label string the same length
@@ -145,14 +151,16 @@ class PinnedBopomofoTextService(TextService):
 
     def onKeyboardStatusChanged(self, opened):
         self.keyboardOpen = opened
-        if not opened:
-            self._restore_chinese_keyboard()
+        self.pending_shift_toggle = False
+        self.last_key_down_time = 0.0
+        if opened:
+            self.english_mode = False
 
-    def _restore_chinese_keyboard(self) -> None:
-        """Make this profile start open and in its internal Chinese mode."""
+    def _reset_internal_chinese_mode(self) -> None:
+        """Reset the field-local mode without overriding the host app."""
         self.english_mode = False
-        self.keyboardOpen = True
-        self.setKeyboardOpen(True)
+        self.pending_shift_toggle = False
+        self.last_key_down_time = 0.0
 
     def filterKeyDown(self, keyEvent):
         self.last_key_event = keyEvent
@@ -411,8 +419,9 @@ class PinnedBopomofoTextService(TextService):
         self._clear_all()
         if forced:
             # TSF uses forced termination when focus moves to another edit
-            # context. Do not carry a field-local English toggle across it.
-            self._restore_chinese_keyboard()
+            # context. Reset our local toggle, but never fight an application
+            # that intentionally disabled its IME context.
+            self._reset_internal_chinese_mode()
 
     def _candidate_number(self, keyEvent) -> int | None:
         # The right-hand numeric keypad is text input, never a candidate key.
@@ -603,8 +612,9 @@ class PinnedBopomofoTextService(TextService):
             return []
         readings = [segment.reading for segment in self.segments[start:end]]
         personal = self.phrase_store.exact(readings)
-        frequent = self.session.frequent_phrase_candidates(
-            [segment.candidates for segment in self.segments[start:end]]
+        frequent = self.session.validated_frequent_phrase_candidates(
+            readings,
+            [segment.candidates for segment in self.segments[start:end]],
         )
         whole_buffer = start == 0 and end == len(self.segments)
         engine = [
@@ -631,8 +641,10 @@ class PinnedBopomofoTextService(TextService):
                     protected,
                     self.session.candidates_for_reading,
                     self.session.frequent_phrase_candidates,
-                    self.session.dictionary_phrase_candidates,
-                    self.session.is_frequent_phrase,
+                    known_phrase_lookup=(
+                        self.session.dictionary_phrase_candidates
+                    ),
+                    replacement_phrase_lookup=self.session.phrase_candidates,
                 )
                 suggestion, typo_changes = self.autocorrector.correct(
                     suggestion, protected
@@ -697,17 +709,34 @@ class PinnedBopomofoTextService(TextService):
             if len(single_choices) >= self.session.max_candidates:
                 break
 
-        # Keep both editing styles on the first page: personal/common phrases
-        # come first, then the highest-ranked single characters. The second
-        # page is reserved for the less useful long tail.
-        front_phrases = phrase_choices[:3]
-        front_single_count = CANDIDATE_PAGE_SIZE - len(front_phrases)
-        choices = (
-            front_phrases
-            + single_choices[:front_single_count]
-            + phrase_choices[len(front_phrases) :]
-            + single_choices[front_single_count:]
+        # At the end, sentence/word candidates remain first for whole-sentence
+        # confirmation. After the caret is moved into the composition, the
+        # user is explicitly editing the character to its right: put that
+        # character's candidates first so pressing 1 cannot accidentally lock
+        # the entire remaining sentence. Keep three phrase choices on page one
+        # so word-level editing remains one key away.
+        editing_inside = (
+            self.focus_index is not None
+            and self.focus_index < len(self.segments) - 1
         )
+        if editing_inside:
+            front_phrase_count = min(3, len(phrase_choices))
+            front_single_count = CANDIDATE_PAGE_SIZE - front_phrase_count
+            choices = (
+                single_choices[:front_single_count]
+                + phrase_choices[:front_phrase_count]
+                + single_choices[front_single_count:]
+                + phrase_choices[front_phrase_count:]
+            )
+        else:
+            front_phrases = phrase_choices[:3]
+            front_single_count = CANDIDATE_PAGE_SIZE - len(front_phrases)
+            choices = (
+                front_phrases
+                + single_choices[:front_single_count]
+                + phrase_choices[len(front_phrases) :]
+                + single_choices[front_single_count:]
+            )
         # A literal Zhuyin spelling must never disappear onto page two while
         # editing an uncommitted sentence. Keep it within the first four
         # positions without displacing the highest-ranked Chinese choice.
@@ -937,8 +966,9 @@ class PinnedBopomofoTextService(TextService):
         frequent_match: tuple[int, str] | None = None
         for width in range(max_width, 1, -1):
             suffix = self.segments[-width:]
-            frequent = self.session.frequent_phrase_candidates(
-                [segment.candidates for segment in suffix]
+            frequent = self.session.validated_frequent_phrase_candidates(
+                [segment.reading for segment in suffix],
+                [segment.candidates for segment in suffix],
             )
             if frequent:
                 frequent_match = (width, frequent[0])
@@ -979,8 +1009,8 @@ class PinnedBopomofoTextService(TextService):
             protected,
             self.session.candidates_for_reading,
             self.session.frequent_phrase_candidates,
-            self.session.dictionary_phrase_candidates,
-            self.session.is_frequent_phrase,
+            known_phrase_lookup=self.session.dictionary_phrase_candidates,
+            replacement_phrase_lookup=self.session.phrase_candidates,
             allow_fuzzy=False,
         )
         for segment, character in zip(self.segments, corrected):

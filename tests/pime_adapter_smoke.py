@@ -154,10 +154,22 @@ def numpad_operator_key(service, key_code: int, sequence: int) -> dict:
     return reply
 
 
-def filter_key(service, method: str, key_code: int, sequence: int, shift=False):
+def filter_key(
+    service,
+    method: str,
+    key_code: int,
+    sequence: int,
+    shift: bool = False,
+    control: bool = False,
+    alt: bool = False,
+):
     key_states = [0] * 256
     if shift:
         key_states[0x10] = 0x80
+    if control:
+        key_states[0x11] = 0x80
+    if alt:
+        key_states[0x12] = 0x80
     if method == "filterKeyDown":
         key_states[key_code] = 0x80
     return service.handleRequest(
@@ -259,6 +271,8 @@ def main() -> None:
         activation_reply = service.handleRequest(
             {"method": "onActivate", "seqNum": 0, "isKeyboardOpen": False}
         )
+        assert "openKeyboard" not in activation_reply
+        assert not service.keyboardOpen
         assert activation_reply["setSelKeys"] == "1234567890"
         assert activation_reply["customizeUI"]["candPerRow"] == 2
         assert activation_reply["customizeUI"]["candFontSize"] == 16
@@ -317,6 +331,32 @@ def main() -> None:
         assert service.session.preedit == ""
         assert service.focus_index == 0
         assert service._candidate_segment_index() == 1
+
+        # Editing the first syllable of a longer uncommitted sentence must
+        # put single-character choices before whole-sentence choices. Choosing
+        # 1 locks only that syllable and advances to the next one; it never
+        # commits or freezes all remaining text.
+        three_service = PinnedBopomofoTextService(DummyClient())
+        three_sequence = type_readings(
+            three_service, ["ㄒㄧㄝˇ", "ㄔㄥˊ", "ㄕˋ"], 900
+        )
+        for offset in range(3):
+            special_key(three_service, 0x25, three_sequence + offset)
+        assert three_service.focus_index == -1
+        special_key(three_service, 0x28, three_sequence + 3)
+        assert three_service.candidate_choices[0].width == 1
+        assert three_service.candidate_choices[0].start == 0
+        select_first_reply = candidate_selection_key(
+            three_service, 0, three_sequence + 4
+        )
+        assert "commitString" not in select_first_reply
+        assert [segment.locked for segment in three_service.segments] == [
+            True,
+            False,
+            False,
+        ]
+        assert three_service.focus_index == 0
+        assert three_service._candidate_segment_index() == 1
 
         # Backspace on a completed character deletes it directly; it must not
         # turn back into a Bopomofo reading.
@@ -493,7 +533,7 @@ def main() -> None:
         assert learned_service.compositionString == ""
         assert not learned_service.provisional
         assert not learned_service.english_mode
-        assert terminated_reply["openKeyboard"] is True
+        assert "openKeyboard" not in terminated_reply
 
         # The full tsi.dat phrase index ranks common 2/3-character words while
         # the UI continues to hold independently editable character segments.
@@ -586,9 +626,49 @@ def main() -> None:
         na_service = PinnedBopomofoTextService(DummyClient())
         sequence = type_readings(na_service, ["ㄋㄚˋ"], sequence)
         assert na_service.compositionString == "那"
+        zuo_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(zuo_service, ["ㄗㄨㄛˋ"], sequence)
+        assert zuo_service.compositionString == "做"
+        shi_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(shi_service, ["ㄕˋ"], sequence)
+        assert shi_service.compositionString == "是"
         self_service = PinnedBopomofoTextService(DummyClient())
         sequence = type_readings(self_service, ["ㄗˋ", "ㄐㄧˇ"], sequence)
         assert self_service.compositionString == "自己"
+
+        # Text-only frequency data may locate a phrase, but it cannot prove
+        # its pronunciation. 殼 is a rare alternate character candidate for
+        # ㄑㄩㄝˋ; that must not let 貝殼 borrow the wrong second syllable.
+        wrong_shell_service = PinnedBopomofoTextService(DummyClient())
+        wrong_shell_readings = ["ㄅㄟˋ", "ㄑㄩㄝˋ"]
+        sequence = type_readings(
+            wrong_shell_service, wrong_shell_readings, sequence
+        )
+        raw_shell_matches = (
+            wrong_shell_service.session.frequent_phrase_candidates(
+                [
+                    segment.candidates
+                    for segment in wrong_shell_service.segments
+                ]
+            )
+        )
+        assert "貝殼" in raw_shell_matches
+        assert "貝殼" not in (
+            wrong_shell_service.session.validated_frequent_phrase_candidates(
+                wrong_shell_readings,
+                [
+                    segment.candidates
+                    for segment in wrong_shell_service.segments
+                ],
+            )
+        )
+        assert wrong_shell_service.compositionString != "貝殼"
+
+        shell_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            shell_service, ["ㄅㄟˋ", "ㄎㄜˊ"], sequence
+        )
+        assert shell_service.compositionString == "貝殼"
 
         # Once a high-confidence word is resolved, later syllables cannot
         # reach backwards and alter it. The protected 優先級 spelling also
@@ -684,6 +764,42 @@ def main() -> None:
         assert punctuation_reply["commitString"] == "字典？"
         assert punctuation_service.compositionString == ""
 
+        # Every printable Shift symbol on the standard keyboard is accounted
+        # for. This protects the two easy-to-miss OEM keys as well as the
+        # existing Chinese punctuation mappings.
+        expected_shift_symbols = {
+            0x20: "ˉ",
+            0x31: "！",
+            0x32: "＠",
+            0x33: "＃",
+            0x34: "＄",
+            0x35: "％",
+            0x36: "……",
+            0x37: "＆",
+            0x38: "＊",
+            0x39: "（",
+            0x30: "）",
+            0xBA: "：",
+            0xBB: "＋",
+            0xBC: "，",
+            0xBD: "——",
+            0xBE: "。",
+            0xBF: "？",
+            0xC0: "～",
+            0xDB: "『",
+            0xDC: "｜",
+            0xDD: "』",
+        }
+        for key_code, expected in expected_shift_symbols.items():
+            symbol_service = PinnedBopomofoTextService(DummyClient())
+            symbol_reply = shifted_key(symbol_service, key_code, sequence)
+            sequence += 1
+            assert symbol_reply["commitString"] == expected, (
+                hex(key_code),
+                symbol_reply["commitString"],
+            )
+            assert not symbol_service.english_mode
+
         # Shift+quote alternates Taiwanese corner quotes.
         open_quote = shifted_key(punctuation_service, 0xDE, sequence)
         sequence += 1
@@ -702,8 +818,8 @@ def main() -> None:
             }
         )
         sequence += 1
-        assert activation_reply["openKeyboard"] is True
-        assert mode_service.keyboardOpen
+        assert "openKeyboard" not in activation_reply
+        assert not mode_service.keyboardOpen
         assert not mode_service.english_mode
         sequence, _ = tap_shift(mode_service, sequence + 1)
         assert mode_service.english_mode
@@ -717,8 +833,9 @@ def main() -> None:
         sequence, _ = tap_shift(mode_service, sequence + 2)
         assert not mode_service.english_mode
 
-        # Windows can close the keyboard compartment when focus changes.
-        # This profile reopens it and resets its field-local English toggle.
+        # Games and custom/secure controls can intentionally close the TSF
+        # keyboard compartment. Respect that state instead of repeatedly
+        # reopening it and racing the host application.
         mode_service.english_mode = True
         status_reply = mode_service.handleRequest(
             {
@@ -728,9 +845,96 @@ def main() -> None:
             }
         )
         sequence += 1
-        assert status_reply["openKeyboard"] is True
+        assert "openKeyboard" not in status_reply
+        assert not mode_service.keyboardOpen
+        assert mode_service.english_mode
+
+        # Reopening the context resets the internal Shift toggle to Chinese,
+        # but still does not write back to the TSF compartment.
+        opened_reply = mode_service.handleRequest(
+            {
+                "method": "onKeyboardStatusChanged",
+                "seqNum": sequence,
+                "opened": True,
+            }
+        )
+        sequence += 1
+        assert "openKeyboard" not in opened_reply
         assert mode_service.keyboardOpen
         assert not mode_service.english_mode
+
+        # Forced composition termination also stays host-controlled.
+        mode_service.english_mode = True
+        terminated_reply = mode_service.handleRequest(
+            {
+                "method": "onCompositionTerminated",
+                "seqNum": sequence,
+                "forced": True,
+            }
+        )
+        sequence += 1
+        assert "openKeyboard" not in terminated_reply
+        assert not mode_service.english_mode
+
+        # Shift+Tab, Shift+F1-F12, Ctrl+Shift and Alt+Shift belong to the
+        # application/Windows. The IME must not consume them.
+        passthrough_service = PinnedBopomofoTextService(DummyClient())
+        assert filter_key(
+            passthrough_service,
+            "filterKeyDown",
+            0x09,
+            sequence,
+            shift=True,
+        )["return"] is False
+        sequence += 1
+        for key_code in range(0x70, 0x7C):
+            assert filter_key(
+                passthrough_service,
+                "filterKeyDown",
+                key_code,
+                sequence,
+                shift=True,
+            )["return"] is False
+            sequence += 1
+        for key_code in (0x08, 0x0D, 0x1B, 0x21, 0x22, 0x23, 0x24, 0x2D, 0x2E):
+            assert filter_key(
+                passthrough_service,
+                "filterKeyDown",
+                key_code,
+                sequence,
+                shift=True,
+            )["return"] is False
+            sequence += 1
+        assert filter_key(
+            passthrough_service,
+            "filterKeyDown",
+            ord("A"),
+            sequence,
+            shift=True,
+            control=True,
+        )["return"] is False
+        sequence += 1
+        assert filter_key(
+            passthrough_service,
+            "filterKeyDown",
+            0x10,
+            sequence,
+            shift=True,
+            alt=True,
+        )["return"] is False
+        sequence += 1
+
+        # Every Shift+A-Z combination emits its corresponding uppercase ASCII
+        # letter while leaving persistent Chinese mode unchanged.
+        for character in "abcdefghijklmnopqrstuvwxyz":
+            letter_service = PinnedBopomofoTextService(DummyClient())
+            sequence, letter_reply = hold_shift_letter(
+                letter_service,
+                character,
+                sequence,
+            )
+            assert letter_reply["commitString"] == character.upper()
+            assert not letter_service.english_mode
 
         # CORE CONTRACT: holding Shift while pressing A-Z emits a temporary
         # uppercase English letter and stays in Chinese mode.  This behavior
@@ -951,10 +1155,12 @@ def main() -> None:
         contextual_service.focus_index = -1
         choices = contextual_service._build_candidate_choices()
         choice_texts = [choice.text for choice in choices]
-        assert choice_texts[0] == "你先開始下一步吧", choice_texts
+        assert choices[0].width == 1, choices
+        assert choices[0].start == 0, choices
+        assert "你先開始下一步吧" in choice_texts[:10], choice_texts
         assert "你先開始夏衣" not in choice_texts
         assert "你掀開" not in choice_texts
-        assert "你先" in choice_texts[:4], choice_texts
+        assert "你先" in choice_texts[:10], choice_texts
 
         # The actual Down-key path first applies that shared default. The
         # correct sentence must already be visible in the editable buffer,
@@ -962,10 +1168,8 @@ def main() -> None:
         special_key(contextual_service, 0x28, sequence)
         sequence += 1
         assert contextual_service.compositionString == "你先開始下一步吧"
-        assert contextual_service.candidateList[0] == "你先開始下一步吧"
-        assert contextual_service.candidate_choices[0].width == len(
-            contextual_service.segments
-        )
+        assert contextual_service.candidate_choices[0].width == 1
+        assert "你先開始下一步吧" in contextual_service.candidateList
         assert "你先開始夏衣" not in contextual_service.candidateList
         assert "你掀開" not in contextual_service.candidateList
 
