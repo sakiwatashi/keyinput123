@@ -1,8 +1,8 @@
 {
   "meta": {
     "name": "智慧優先注音高可信常見錯字規則",
-    "version": 3,
-    "policy": "只收錄可作精確字串替換、字數相同且不依賴歧義語境的臺灣正體中文錯字。教育部資料僅用於正詞與用例核對，不重製辭典釋義。",
+    "version": 4,
+    "policy": "只收錄可作精確字串替換、字數相同且不依賴歧義語境的臺灣正體中文錯字。教育部資料僅用於正詞與用例核對，不重製辭典釋義。本機 feedback 僅在人工審查後、且通過等長／無歧義條件時收錄。不收錄的／得／地、在／再等語境依賴項。",
     "sources": [
       {
         "id": "naer_usage_analysis",
@@ -13,6 +13,11 @@
         "id": "moe_dictionary_validation",
         "title": "教育部國語辭典公眾授權網（簡編本、小字典與成語典）",
         "url": "https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/index.html"
+      },
+      {
+        "id": "local_feedback_review",
+        "title": "本機明確改選回饋經人工審查後收錄（僅等長、無歧義高頻錯字）",
+        "url": "https://github.com/sakiwatashi/inputmethod"
       }
     ]
   },
@@ -62,6 +67,29 @@
     {"wrong": "一泄千里", "correct": "一瀉千里", "source": "moe_dictionary_validation"},
     {"wrong": "一諾千斤", "correct": "一諾千金", "source": "moe_dictionary_validation"},
     {"wrong": "老生長談", "correct": "老生常談", "source": "moe_dictionary_validation"},
-    {"wrong": "相形見拙", "correct": "相形見絀", "source": "moe_dictionary_validation"}
+    {"wrong": "相形見拙", "correct": "相形見絀", "source": "moe_dictionary_validation"},
+    {"wrong": "既使", "correct": "即使", "source": "moe_dictionary_validation"},
+    {"wrong": "問提", "correct": "問題", "source": "local_feedback_review"},
+    {"wrong": "可已", "correct": "可以", "source": "local_feedback_review"},
+    {"wrong": "舊可已", "correct": "就可以", "source": "local_feedback_review"},
+    {"wrong": "舊是", "correct": "就是", "source": "local_feedback_review"},
+    {"wrong": "因未", "correct": "因為", "source": "local_feedback_review"},
+    {"wrong": "後選", "correct": "候選", "source": "local_feedback_review"},
+    {"wrong": "規擇", "correct": "規則", "source": "local_feedback_review"},
+    {"wrong": "選則", "correct": "選擇", "source": "local_feedback_review"},
+    {"wrong": "設記", "correct": "設計", "source": "local_feedback_review"},
+    {"wrong": "時現", "correct": "實現", "source": "local_feedback_review"},
+    {"wrong": "為修", "correct": "維修", "source": "local_feedback_review"},
+    {"wrong": "部太", "correct": "不太", "source": "local_feedback_review"},
+    {"wrong": "鳩錯", "correct": "糾錯", "source": "local_feedback_review"},
+    {"wrong": "事界", "correct": "世界", "source": "local_feedback_review"},
+    {"wrong": "優話", "correct": "優化", "source": "local_feedback_review"},
+    {"wrong": "註音", "correct": "注音", "source": "local_feedback_review"},
+    {"wrong": "第圖", "correct": "地圖", "source": "local_feedback_review"},
+    {"wrong": "戮線", "correct": "路線", "source": "local_feedback_review"},
+    {"wrong": "從向", "correct": "縱向", "source": "local_feedback_review"},
+    {"wrong": "空白劍", "correct": "空白鍵", "source": "local_feedback_review"},
+    {"wrong": "功能見", "correct": "功能鍵", "source": "local_feedback_review"},
+    {"wrong": "仙選擇", "correct": "先選擇", "source": "local_feedback_review"}
   ]
 }

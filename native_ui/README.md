@@ -9,7 +9,10 @@ Japanese-inspired candidate window bundled with Smart Priority Bopomofo.
 - Upstream: https://github.com/EasyIME/PIME
 - License: LGPL-2.0-or-later; see `LGPL-2.0.txt`.
 
-`src/CandidateWindow.cpp` is the complete modified source. The UI uses a warm
+`src/CandidateWindow.cpp` owns the Japanese surface and the two-column
+vertical-first grid (left 1–5, right 6–0). `src/PIMETextService.cpp` forces
+that window to stay visible even when apps try to take over TSF UI elements
+(which would otherwise hide our window and drop the layout). The UI uses a warm
 paper background, indigo accents, rounded clipping, a thin neutral border,
 DPI-scaled spacing, and double-buffered painting. `src/CMakeLists.txt` excludes
 PIMELauncher because the product keeps the signed launcher's existing binary

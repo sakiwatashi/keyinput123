@@ -19,21 +19,30 @@
 - `bopomofo_core/pinned_store.py`：單一讀音的個人優先字。
 - `bopomofo_core/phrase_store.py`：使用者確認過的 2–12 字詞語。
 - `bopomofo_core/frequency_lexicon.py`：離線高頻詞索引查詢；資料位於 `bopomofo_core/data/`。
+- `bopomofo_core/reading_phrase_lexicon.py`：查詢帶完整注音與權重的單字／詞語索引。
+- `bopomofo_core/phrase_decoder.py`：以動態規劃把整句切成多個精確注音詞，不要求字典含有整句。
 - `bopomofo_core/autocorrect.py`：產生可見完整句候選的離線高可信錯字修正；規則位於 `bopomofo_core/data/common_typos.json`。
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
+- `tools/build_reading_phrase_lexicon.py`：合併固定版本 McBopomofo、libchewing-data 與 Rime Essay 權重，重建 `reading_phrases.json.gz`；生成檔不應手工修改。
 - `tests/`：核心與 PIME 整合測試。
 - `installer/`：正式安裝與解除安裝流程。
 - `native_ui/`：候選框的完整 LGPL 原始碼、可重現建置腳本及 x86/x64 產物。
 
 候選視窗的字型、每列數量、選擇標籤與方向鍵行為由 Python 模組控制；圓角、顏色、
-邊框與選取樣式位於 `native_ui/src/CandidateWindow.cpp`。原生元件固定從隨附的
-PIME `v1.3.0-stable` 重建，但它沒有正式程式碼簽章，可能與遊戲反作弊衝突。
+邊框、選取樣式，以及**兩個直欄（左 1–5、右 6–0、先直後橫）**都位於
+`native_ui/src/CandidateWindow.cpp`。原廠簽章 `PIMETextService.dll` 會把
+`candPerRow=2` 畫成橫向成對（`1 2 / 3 4 / …`），看起來像「候選單不是縱向」——
+那不是 Python 壞了，是原生 UI 被還原。原生元件固定從隨附的 PIME `v1.3.0-stable`
+重建，但它沒有正式程式碼簽章，可能與遊戲反作弊衝突。
 全新安裝與尚未選擇介面的使用者保留 PIME 原廠簽章 DLL；只有使用者明確傳入
 `-EnableUnsignedNativeUi` 且沒有其他 PIME 模組時才首次套用自訂 DLL。這項選擇必須
 跨一般更新、EXE 與 AI 維護持久保存，除非明確傳入 `-DisableUnsignedNativeUi`，不得在
-更新 Python 層時恢復舊簽章介面。安裝器須備份與還原原始 DLL；被 TSF 鎖定時以
-`MoveFileEx` 排程至重開機，不能把這些限制拿掉。
+更新 Python 層時恢復舊簽章介面。**修 IME／緊急腳本／「讓中文能打」都不得**
+以簽章 `Valid` 為目標去蓋回原廠 DLL，也不得把
+`%ProgramData%\SmartPriorityBopomofo\native-ui-preference.json` 設成
+`enabled: false`，也不得清掉 `native-state\pending` 的待套用 DLL。安裝器須備份與
+還原原始 DLL；被 TSF 鎖定時以 `MoveFileEx` 排程至重開機，不能把這些限制拿掉。
 
 候選窗每頁固定 10 個、分成兩個直欄：左欄由上而下 `1–5`，右欄由上而下 `6–0`；`→` 直接翻到下一頁，`↓` 依數字順序逐項移動並在
 本頁末端翻頁。完整讀音的原始注音須留在前四個候選。單獨注音按空白時一律先向
@@ -55,9 +64,10 @@ PIME `v1.3.0-stable` 重建，但它沒有正式程式碼簽章，可能與遊�
 的另一套第一候選邏輯，也禁止在 Enter 路徑另外做不可見修正。方向鍵是改選功能，
 不是取得系統已知正解的必要步驟。
 
-Rime Essay 與台灣字頻只有文字／權重，沒有完整詞語讀音；其逐字候選交集只能用來搜尋，
-不可直接更改組字。任何高頻詞或模糊音修正都必須再經 `phrase_candidates(readings)`
-驗證整段讀音。游標在句中時，候選零必須是游標右側的單字候選，選擇後只鎖定涵蓋的
+Rime Essay 與台灣字頻本身只有文字／權重，沒有完整詞語讀音；權重只能套用到
+`reading_phrases.json.gz` 已由 McBopomofo 或 libchewing-data 證明完整讀音的拼法。
+整句預設必須由 `phrase_decoder.py` 的全域詞網格決定，不能再用逐字貪婪修正覆蓋結果。
+任何高頻詞或模糊音修正也必須再經精確讀音索引驗證。游標在句中時，候選零必須是游標右側的單字候選，選擇後只鎖定涵蓋的
 音節並前進；詞語與完整句候選保留在同一頁。游標在句尾時才可把完整句／詞語排在前面。
 
 ## 修改後必須驗證

@@ -36,6 +36,14 @@ When PIME is installed, also run:
   contain 1-5 from top to bottom and the right column 6-0; never bind A-J as
   candidate labels. Do not replace or
   remove these behaviors without an explicit user request.
+- The two-column **vertical-first** grid and Japanese-inspired candidate chrome
+  live only in `native_ui/` (`CandidateWindow.cpp` + built `PIMETextService.dll`).
+  Stock signed PIME treats `candPerRow=2` as row-major horizontal pairs
+  (`1 2 / 3 4 / …`), which is a regression. Once the user has opted in
+  (`native-ui-preference.json` `enabled: true`), **never** restore signed
+  DLLs, never run `-DisableUnsignedNativeUi`, and never “fix Chinese input”
+  by forcing `Valid` Authenticode on `PIMETextService.dll`. Emergency recovery
+  may only fix language list / tip Enable / launcher — not candidate UI.
 - Candidate editing must offer and atomically apply common/personal phrases
   spanning 2-12 syllables while keeping high-frequency single-character and
   literal-Zhuyin choices available on the first ten-item page. At the end of
@@ -52,8 +60,9 @@ When PIME is installed, also run:
   engine already knew.
 - Ranking order is a core contract: an explicit user candidate selection is
   first. Bundled candidates compare exact reading-span coverage before source
-  weight, so a shorter suffix cannot overwrite a longer complete conversion;
-  equal spans prefer Taiwan character/word frequencies, then engine/Rime.
+  weight through the global phrase lattice, so a shorter suffix cannot
+  overwrite a longer complete conversion; equal spans prefer the pinned
+  Rime/McBopomofo occurrence weights before the legacy engine.
   A stored single-character pin stays candidate zero for isolated input but
   is not a context lock; a reliable word or whole-buffer conversion may
   override it. Only a choice made explicitly in the current composition or a
@@ -75,9 +84,11 @@ When PIME is installed, also run:
   stored single-character pin alone is not a context lock. Do not add
   context-dependent pairs such as 的/得/地 or
   在/再 as unconditional replacements, and never upload text for correction.
-- Unlocked spans are re-ranked live from their retained Bopomofo readings
-  through `phonetic_corrector.py` and the bundled phrase indexes. Reviewed
-  fuzzy phonetic-slot confusions and fallback typo rules must become visible
+- Unlocked spans are re-ranked live from their retained Bopomofo readings by
+  `phrase_decoder.py` and the exact-reading index. Do not run a second greedy
+  exact-phrase pass after the lattice; it can destroy a globally coherent
+  result. `phonetic_corrector.py`, reviewed fuzzy phonetic-slot confusions,
+  and fallback typo rules must become visible
   whole-sentence candidates before Enter. Surface variants such as 音該/英該
   must not be enumerated as separate rules, and a valid exact-reading phrase
   must be preserved as an alternate candidate.
@@ -109,6 +120,10 @@ When PIME is installed, also run:
 - `bopomofo_core/data/high_frequency_phrases.json` is a generated LGPL-3.0
   derivative of pinned Rime Essay data. Never hand-edit it; preserve its
   attribution, generator, source hashes, and bundled license.
+- `bopomofo_core/data/reading_phrases.json.gz` is a generated exact-reading
+  index from pinned McBopomofo and libchewing-data rows, ranked with pinned
+  Rime Essay occurrences. Never hand-edit it; preserve the generator, source
+  hashes, MIT/LGPL notices, and the alternate-reading regression.
 - `bopomofo_core/data/taiwan_frequency.json` is generated from the Ministry of
   Education's official open-data character and word tables. Never hand-edit
   it; preserve attribution, source hashes, generator, and data notice.

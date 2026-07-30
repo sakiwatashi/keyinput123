@@ -56,16 +56,17 @@ void candidateGrid(int itemCount, int maxColumns, int& rows, int& columns) {
         return;
     }
 
-    // Smart Priority Bopomofo uses two columns of five. Fill the left column
-    // (1-5) before the right column (6-0), matching Microsoft Bopomofo instead
-    // of the original row-major 1/2, 3/4 layout.
-    if(maxColumns == 2 && itemCount <= 10) {
+    // Always use the Microsoft Bopomofo vertical-first page for up to ten
+    // candidates: left column 1-5 top-to-bottom, right column 6-0. Do not
+    // fall back to row-major "N per row" layout even if candPerRow is wrong
+    // (stock PIME defaults to 10, which draws one horizontal strip).
+    if(itemCount <= 10) {
         rows = min(5, itemCount);
         columns = (itemCount + rows - 1) / rows;
         return;
     }
 
-    columns = min(maxColumns, itemCount);
+    columns = min(max(1, maxColumns), itemCount);
     rows = (itemCount + columns - 1) / columns;
 }
 

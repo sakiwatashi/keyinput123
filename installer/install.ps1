@@ -7,6 +7,7 @@
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "native_ui_preference.ps1")
+. (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
@@ -16,117 +17,6 @@ $nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
 $installedPimeThisRun = $false
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 Start-Transcript -LiteralPath $logPath -Force | Out-Null
-
-function Restore-OriginalPimeTextService {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$PimeRoot,
-        [Parameter(Mandatory = $true)]
-        [string]$StateRoot
-    )
-
-    $nativeMarker = Join-Path $StateRoot "native-ui.json"
-    $backupRoot = Join-Path $StateRoot "backup"
-    $pendingRoot = Join-Path $StateRoot "pending"
-    if (-not (Test-Path -LiteralPath $nativeMarker) -or
-        -not (Test-Path -LiteralPath $backupRoot)) {
-        return
-    }
-
-    $nativeHashes = Get-Content -LiteralPath $nativeMarker -Raw -Encoding UTF8 |
-        ConvertFrom-Json
-    $nativeStateCanBeRemoved = $true
-    $restoreScheduled = $false
-    if (-not ("SmartPriorityNativeMethods" -as [type])) {
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public static class SmartPriorityNativeMethods {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool MoveFileEx(
-        string existingFile,
-        string newFile,
-        int flags
-    );
-}
-"@
-    }
-
-    foreach ($architecture in @("x86", "x64")) {
-        $targetDll = Join-Path $PimeRoot "$architecture\PIMETextService.dll"
-        $backupDll = Join-Path $backupRoot "$architecture\PIMETextService.dll"
-        $pendingDll = Join-Path $pendingRoot "$architecture\PIMETextService.dll"
-        $expectedCustomHash = $nativeHashes.$architecture
-        if (-not (Test-Path -LiteralPath $targetDll) -or
-            -not (Test-Path -LiteralPath $backupDll)) {
-            $nativeStateCanBeRemoved = $false
-            continue
-        }
-
-        $backupSignature = Get-AuthenticodeSignature -LiteralPath $backupDll
-        if ($backupSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-            throw "Refusing to restore an unsigned or invalid $architecture PIME backup."
-        }
-        $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash
-        $backupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupDll).Hash
-        if ($targetHash -eq $backupHash) {
-            continue
-        }
-
-        if ($expectedCustomHash -and $targetHash -eq $expectedCustomHash) {
-            try {
-                Copy-Item -LiteralPath $backupDll -Destination $targetDll -Force
-            }
-            catch [System.IO.IOException], [System.UnauthorizedAccessException] {
-                # The TSF DLL is normally loaded by desktop and game clients.
-                # Keep a persistent signed source and replace it at reboot.
-                $restoreDll = Join-Path $StateRoot "restore\$architecture\PIMETextService.dll"
-                New-Item -ItemType Directory -Path (Split-Path -Parent $restoreDll) -Force | Out-Null
-                Copy-Item -LiteralPath $backupDll -Destination $restoreDll -Force
-                $scheduled = [SmartPriorityNativeMethods]::MoveFileEx(
-                    $restoreDll,
-                    $targetDll,
-                    0x4 -bor 0x1
-                )
-                if (-not $scheduled) {
-                    $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                    throw "Unable to schedule the $architecture signed PIME DLL restore (Win32 $win32Error)."
-                }
-                $nativeStateCanBeRemoved = $false
-                $restoreScheduled = $true
-            }
-            continue
-        }
-
-        if ($nativeHashes.($architecture + "Pending") -and
-            (Test-Path -LiteralPath $pendingDll)) {
-            # Removing the source cancels an unsigned replacement that Windows
-            # has not performed yet.
-            Remove-Item -LiteralPath $pendingDll -Force
-            if ($targetHash -ne $backupHash) {
-                $nativeStateCanBeRemoved = $false
-            }
-            continue
-        }
-
-        # Another product changed the shared DLL. Preserve every backup and
-        # avoid overwriting an unknown installation.
-        $nativeStateCanBeRemoved = $false
-    }
-
-    if ($nativeStateCanBeRemoved -and (Test-Path -LiteralPath $StateRoot)) {
-        Remove-Item -LiteralPath $StateRoot -Recurse -Force
-        Write-Output "Restored the signed PIME text-service DLLs."
-    }
-    elseif ($restoreScheduled) {
-        Write-Output "The signed PIME text-service DLL restore will finish after Windows restarts."
-    }
-    else {
-        Write-Output "Preserved the native UI backup because the shared PIME DLL was changed by another product."
-    }
-}
 
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -195,6 +85,12 @@ try {
     if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath $launcher -ArgumentList "/quit" -Wait
     }
+
+    # The out-of-process candidate window lives inside the module directory and
+    # holds its own executable open, which would block replacing that
+    # directory. It is disposable and the input method relaunches it on demand.
+    Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
 
     $targetParent = Join-Path $resolvedRoot "python\input_methods"
     $targetModule = Join-Path $targetParent $moduleName
@@ -282,6 +178,9 @@ try {
         throw "The remembered custom candidate UI cannot be installed because its payload is missing or unrelated PIME modules are present."
     }
     if ($canInstallNativeUi) {
+        # An earlier rollback may still hold a reboot-time signed restore in
+        # the queue; cancel it so this explicit enable survives the restart.
+        Clear-SmartPriorityScheduledSignedRestore -StateRoot $nativeStateRoot
         $backupRoot = Join-Path $nativeStateRoot "backup"
         $pendingRoot = Join-Path $nativeStateRoot "pending"
         New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null

@@ -13,9 +13,11 @@ from textService import TextService
 
 from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
+from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
 from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.keymap import symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
+from .bopomofo_core.phrase_decoder import decode_phrase_lattice
 from .bopomofo_core.phrase_store import MAX_PHRASE_LENGTH, PhraseStore
 from .bopomofo_core.phonetic_corrector import PhoneticCorrector
 from .bopomofo_core.pinned_store import PinnedStore
@@ -116,6 +118,73 @@ class PinnedBopomofoTextService(TextService):
         self.reading_open = False
         self.candidate_page = 0
         self.candidate_choices: list[CandidateChoice] = []
+        self.candidate_ui = candidate_ui_client()
+
+    def _mirror_candidates(self) -> None:
+        """Sends the current candidate page to the out-of-process window.
+
+        Visibility is driven from three separate PIME setters, so the mirror
+        reads the resulting state rather than any one call's argument. That
+        makes it immune to the order in which the list, the cursor, and the
+        visibility flag are set during a single key event.
+
+        The mirror is additive: what PIME's own window receives is unchanged,
+        so a missing or stalled helper leaves typing exactly as it is today.
+        It is also cosmetic, so no failure here may escape into the key
+        handler and break composition.
+        """
+        try:
+            if self.showCandidates and self.candidateList:
+                self.candidate_ui.show(self.candidateList, self.candidateCursor or 0)
+            else:
+                self.candidate_ui.hide()
+        except Exception:
+            pass
+
+    def handleRequest(self, msg):
+        reply = super().handleRequest(msg)
+        self._apply_beacon_mode(reply)
+        return reply
+
+    def _apply_beacon_mode(self, reply) -> None:
+        """Shrinks PIME's own candidate window to a bare position marker.
+
+        The out-of-process window has no way to learn where the caret is: the
+        rectangle exists only inside a TSF edit session in the client process
+        and no protocol field carries it. PIME's own window already knows,
+        because the signed DLL moves it to the composition rectangle, and it
+        does so regardless of how many candidates there are. Emptying the list
+        therefore leaves a correctly positioned marker a few pixels wide, which
+        the helper anchors to and covers.
+
+        Only the value on the wire is rewritten. ``self.candidateList`` keeps
+        the real page so ranking, paging and selection are untouched, and the
+        mirror still sends the true list to the helper.
+
+        This is gated on proof that the helper is alive. Without it the real
+        list would exist nowhere and the user would face an empty box.
+        """
+        if not self.candidate_ui.beacon_ready:
+            return
+        if not self.showCandidates or "candidateList" not in reply:
+            return
+        if not reply["candidateList"]:
+            return
+        reply["candidateList"] = [" "]
+        # A cursor past the end of the shrunken list has nothing to point at.
+        reply["candidateCursor"] = 0
+
+    def setCandidateList(self, candidates):
+        super().setCandidateList(candidates)
+        self._mirror_candidates()
+
+    def setShowCandidates(self, show):
+        super().setShowCandidates(show)
+        self._mirror_candidates()
+
+    def setCandidateCursor(self, pos):
+        super().setCandidateCursor(pos)
+        self._mirror_candidates()
 
     @property
     def provisional(self) -> bool:
@@ -148,6 +217,12 @@ class PinnedBopomofoTextService(TextService):
         self.english_mode = False
         self.pending_shift_toggle = False
         self.last_key_down_time = 0.0
+        # The helper draws a topmost window; leaving it up after this profile
+        # goes away would strand it over an unrelated application.
+        try:
+            self.candidate_ui.hide()
+        except Exception:
+            pass
 
     def onKeyboardStatusChanged(self, opened):
         self.keyboardOpen = opened
@@ -617,17 +692,68 @@ class PinnedBopomofoTextService(TextService):
             [segment.candidates for segment in self.segments[start:end]],
         )
         whole_buffer = start == 0 and end == len(self.segments)
+        trusted = self.session.trusted_phrase_candidates(readings)
         engine = [
             phrase
             for phrase in self.session.phrase_candidates(readings)
-            if whole_buffer or self.session.is_frequent_phrase(phrase)
+            if whole_buffer
+            or phrase in trusted
+            or self.session.is_frequent_phrase(phrase)
         ]
         corrected: list[str] = []
+        contextual: list[str] = []
         current_text = "".join(
             segment.text for segment in self.segments[start:end]
         )
         if whole_buffer:
             protected = [segment.locked for segment in self.segments[start:end]]
+            context_protected = list(protected)
+            has_lexical_span = False
+            # Exact phrases chosen by the lattice are reliable context, even
+            # when the whole sentence is assembled from several dictionary
+            # rows. Fuzzy correction may work around them, but must not turn
+            # 層數+較高 back into an unrelated whole-engine guess.
+            decoded = decode_phrase_lattice(
+                readings,
+                current_text,
+                protected,
+                self.session.lexical_phrase_candidates,
+                self.session.phrase_weight,
+                self.phrase_store.exact,
+                MAX_PHRASE_LENGTH,
+            )
+            for span in decoded:
+                if span.end - span.start < 2 or span.text != current_text[
+                    span.start : span.end
+                ]:
+                    continue
+                has_lexical_span = True
+                for index in range(span.start, span.end):
+                    context_protected[index] = True
+            if has_lexical_span:
+                for source in engine:
+                    if len(source) != len(current_text):
+                        continue
+                    hybrid = "".join(
+                        current if is_protected else suggested
+                        for current, suggested, is_protected in zip(
+                            current_text, source, context_protected
+                        )
+                    )
+                    if (
+                        hybrid != current_text
+                        and all(
+                            is_protected
+                            or suggested in segment.candidates
+                            for suggested, segment, is_protected in zip(
+                                source,
+                                self.segments[start:end],
+                                context_protected,
+                            )
+                        )
+                        and hybrid not in contextual
+                    ):
+                        contextual.append(hybrid)
             # Re-decode both the visible text and the exact-reading sources.
             # On the next render the visible text may already be corrected;
             # retaining the engine sources here makes the corrected sentence
@@ -642,9 +768,11 @@ class PinnedBopomofoTextService(TextService):
                     self.session.candidates_for_reading,
                     self.session.frequent_phrase_candidates,
                     known_phrase_lookup=(
-                        self.session.dictionary_phrase_candidates
+                        self.session.trusted_phrase_candidates
                     ),
-                    replacement_phrase_lookup=self.session.phrase_candidates,
+                    replacement_phrase_lookup=(
+                        self.session.trusted_phrase_candidates
+                    ),
                 )
                 suggestion, typo_changes = self.autocorrector.correct(
                     suggestion, protected
@@ -652,17 +780,29 @@ class PinnedBopomofoTextService(TextService):
                 if (
                     suggestion != source
                     and (phonetic_changes or typo_changes)
+                    and all(
+                        not is_protected or suggested == current
+                        for suggested, current, is_protected in zip(
+                            suggestion, current_text, context_protected
+                        )
+                    )
                     and suggestion not in corrected
                 ):
                     corrected.append(suggestion)
+        trusted_current = current_text in trusted
+        trusted_front = trusted if trusted_current else []
+        trusted_tail = [] if trusted_current else trusted
         return [
             phrase
             for phrase in dict.fromkeys(
                 ([personal] if personal else [])
+                + trusted_front
                 + corrected
                 + frequent
+                + trusted_tail
+                + [current_text]
+                + contextual
                 + engine
-                + ([current_text] if corrected else [])
             )
             if len(phrase) == end - start
         ]
@@ -945,81 +1085,41 @@ class PinnedBopomofoTextService(TextService):
         self._render_buffer()
 
     def _apply_phrase_ranking(self) -> None:
-        """Rank complete words by user choice, span coverage, then source."""
+        """Decode every unlocked span, then apply whole-sentence correction."""
         if len(self.segments) < 2:
             return
-        readings = [segment.reading for segment in self.segments]
+        self._apply_phrase_lattice()
         whole_options = self._ranked_phrase_options(0, len(self.segments))
         whole_default = whole_options[0] if whole_options else ""
         if whole_default:
             self._apply_ranked_phrase(len(self.segments), whole_default)
 
-        personal_length, personal_phrase = self.phrase_store.best_suffix(
-            readings
-        )
-
-        # Find lexical evidence over every suffix, longest first. A complete
-        # engine phrase such as 對話框 must beat a shorter frequency match such
-        # as 畫框; only candidates covering the same number of syllables are
-        # compared by source, where Taiwan/frequency data remains preferred.
-        max_width = min(MAX_PHRASE_LENGTH, len(self.segments))
-        frequent_match: tuple[int, str] | None = None
-        for width in range(max_width, 1, -1):
-            suffix = self.segments[-width:]
-            frequent = self.session.validated_frequent_phrase_candidates(
-                [segment.reading for segment in suffix],
-                [segment.candidates for segment in suffix],
-            )
-            if frequent:
-                frequent_match = (width, frequent[0])
-                break
-
-        # The conversion engine's best result is evidence for the entire
-        # current span even when libchewing does not expose that word through
-        # its alternate-candidate API (對話框 is one such real case).
-        engine_match = (
-            (len(self.segments), whole_default)
-            if whole_default
-            else None
-        )
-        lexical_match = frequent_match
-        if engine_match is not None and (
-            lexical_match is None or engine_match[0] > lexical_match[0]
-        ):
-            lexical_match = engine_match
-        if lexical_match is not None:
-            self._apply_ranked_phrase(*lexical_match)
-
-        # Explicit user selection is the strongest layer, even when it covers
-        # a shorter suffix than a bundled phrase.
-        if personal_length:
-            self._apply_ranked_phrase(personal_length, personal_phrase, lock=True)
-        self._apply_live_phonetic_ranking()
-
-    def _apply_live_phonetic_ranking(self) -> None:
-        """Re-rank every unlocked word from exact readings while composing."""
-        if len(self.segments) < 2:
-            return
+    def _apply_phrase_lattice(self) -> None:
+        """Compose one sentence from multiple exact-reading common words."""
         readings = [segment.reading for segment in self.segments]
-        text = "".join(segment.text for segment in self.segments)
+        current_text = "".join(segment.text for segment in self.segments)
         protected = [segment.locked for segment in self.segments]
-        corrected, _ = self.phonetic_corrector.correct(
+        spans = decode_phrase_lattice(
             readings,
-            text,
+            current_text,
             protected,
-            self.session.candidates_for_reading,
-            self.session.frequent_phrase_candidates,
-            known_phrase_lookup=self.session.dictionary_phrase_candidates,
-            replacement_phrase_lookup=self.session.phrase_candidates,
-            allow_fuzzy=False,
+            self.session.lexical_phrase_candidates,
+            self.session.phrase_weight,
+            self.phrase_store.exact,
+            MAX_PHRASE_LENGTH,
         )
-        for segment, character in zip(self.segments, corrected):
-            if segment.locked or segment.text == character:
-                continue
-            segment.candidates = list(
-                dict.fromkeys([character] + segment.candidates)
-            )[: self.session.max_candidates]
-            segment.selected = 0
+        for span in spans:
+            for segment, character in zip(
+                self.segments[span.start : span.end], span.text
+            ):
+                if segment.locked:
+                    continue
+                segment.candidates = list(
+                    dict.fromkeys([character] + segment.candidates)
+                )[: self.session.max_candidates]
+                segment.selected = 0
+                if span.personal:
+                    segment.locked = True
 
     def _apply_ranked_phrase(
         self, width: int, phrase: str, lock: bool = False

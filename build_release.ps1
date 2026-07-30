@@ -11,6 +11,7 @@ $pimeLicense = Join-Path $stagingRoot "PIME-LICENSE.txt"
 $chewingLicense = Join-Path $stagingRoot "libchewing-COPYING.txt"
 $rimeEssayLicense = Join-Path $stagingRoot "rime-essay-LICENSE.txt"
 $moeDataNotice = Join-Path $stagingRoot "MOE-OPEN-DATA-NOTICE.txt"
+$mcBopomofoLicense = Join-Path $stagingRoot "McBopomofo-LICENSE.txt"
 
 function Reset-ProjectDirectory([string]$Path) {
     $resolvedProject = [IO.Path]::GetFullPath($projectRoot).TrimEnd("\")
@@ -48,6 +49,7 @@ Reset-ProjectDirectory $stagingRoot
 & (Join-Path $projectRoot "build_pime_overlay.ps1") | Out-Null
 Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $stagingRoot "THIRD_PARTY_NOTICES.txt") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moeDataNotice -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\McBopomofo-LICENSE.txt") -Destination $mcBopomofoLicense -Force
 
 $workspaceRoot = Split-Path -Parent $projectRoot
 Get-VerifiedFile `

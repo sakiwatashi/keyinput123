@@ -21,6 +21,8 @@
    授權：GNU Lesser General Public License 2.1 or later
    詞庫資料識別版本：2025.8.19
    詞庫資料著作權：Copyright 2025 libchewing Core Team
+   另使用 libchewing-data 版本
+   c44e81aef24b06f1509f19e1be54c99812d0c43f 的明確注音詞條建立讀音索引。
 
 3. Rime Essay（八股文）高頻詞彙與語言模型
    專案：https://github.com/rime/rime-essay
@@ -40,12 +42,22 @@
    4,610 個字頻與 43,632 個二至十二字詞頻。完整顯名聲明見
    MOE-OPEN-DATA-NOTICE.txt。
 
+5. McBopomofo 詞庫
+   專案：https://github.com/openvanilla/McBopomofo
+   原始碼版本：ee9941a6bdafe0fd58412207c04c1e985dd57b03
+   授權：MIT
+   本專案合併 BPMFBase.txt、BPMFMappings.txt、phrase.occ、目前
+   libchewing-data 明確注音詞條及 Rime Essay 權重，產生 178,148 條
+   單字／詞語的精確注音索引。Rime Essay 權重只套用到已有明確注音證據
+   的拼法，不會用文字相同推測破音字讀法。
+
 完整授權條款隨安裝程式放在安裝目錄：
 
 - PIME-LICENSE.txt
 - libchewing-COPYING.txt
 - rime-essay-LICENSE.txt
 - MOE-OPEN-DATA-NOTICE.txt
+- McBopomofo-LICENSE.txt
 
 個人學習資料位於 %APPDATA%\PinnedBopomofo。解除安裝預設保留該資料，方便
 重新安裝或自行備份。

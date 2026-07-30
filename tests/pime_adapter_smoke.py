@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -406,7 +407,9 @@ def main() -> None:
         # High-confidence fuzzy correction is a visible sentence candidate,
         # not an invisible Enter-time mutation. The exact-reading sentence is
         # retained as candidate two so the user can explicitly override it.
-        assert autocorrect_service.compositionString == "我應該不會去"
+        assert autocorrect_service.compositionString == "我應該不會去", ascii(
+            autocorrect_service.compositionString
+        )
         special_key(autocorrect_service, 0x28, autocorrect_sequence)
         autocorrect_sequence += 1
         assert autocorrect_service.candidateList[:2] == [
@@ -474,9 +477,10 @@ def main() -> None:
             live_service._apply_phrase_ranking()
             live_service._render_buffer()
             assert live_service.compositionString == expected, (
-                readings,
-                wrong,
-                live_service.compositionString,
+                ascii(readings),
+                ascii(wrong),
+                ascii(live_service.compositionString),
+                ascii(expected),
             )
 
         # A character explicitly chosen by the user is protected. This is the
@@ -669,6 +673,75 @@ def main() -> None:
             shell_service, ["ㄅㄟˋ", "ㄎㄜˊ"], sequence
         )
         assert shell_service.compositionString == "貝殼"
+
+        # The automatic default is decoded as a lattice of common words, not
+        # as unrelated per-syllable defaults or one required whole-sentence
+        # dictionary row. This is the regression for 曾恕叫高.
+        lattice_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            lattice_service,
+            ["ㄘㄥˊ", "ㄕㄨˋ", "ㄐㄧㄠˋ", "ㄍㄠˉ"],
+            sequence,
+        )
+        assert lattice_service.compositionString == "層數較高", ascii(
+            lattice_service.compositionString
+        )
+
+        multiword_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            multiword_service,
+            [
+                "ㄅㄨˋ",
+                "ㄒㄩˉ",
+                "ㄧㄠˋ",
+                "ㄖㄣˊ",
+                "ㄍㄨㄥˉ",
+                "ㄘˊ",
+                "ㄩˇ",
+                "ㄇㄛˊ",
+                "ㄒㄧㄥˊ",
+                "ㄩˇ",
+                "ㄈㄣˉ",
+                "ㄘˊ",
+                "ㄧㄢˇ",
+                "ㄙㄨㄢˋ",
+                "ㄈㄚˇ",
+            ],
+            sequence,
+        )
+        assert (
+            multiword_service.compositionString
+            == "不需要人工詞語模型與分詞演算法"
+        )
+
+        # A sentence assembled from ordinary words must not fall back to
+        # unrelated same-sound characters at the uncovered boundaries.
+        natural_sentence_service = PinnedBopomofoTextService(DummyClient())
+        sequence = type_readings(
+            natural_sentence_service,
+            [
+                "ㄇㄟˇ",
+                "ㄩˋ",
+                "ㄉㄠˋ",
+                "ㄧˊ",
+                "ㄐㄩˋ",
+                "ㄒㄧㄣˉ",
+                "ㄐㄩˋ",
+                "ㄗ˙",
+                "ㄐㄧㄡˋ",
+                "ㄎㄠˋ",
+                "ㄖㄣˊ",
+                "ㄍㄨㄥˉ",
+                "ㄅㄨˇ",
+                "ㄍㄨㄟˉ",
+                "ㄗㄜˊ",
+            ],
+            sequence,
+        )
+        assert (
+            natural_sentence_service.compositionString
+            == "每遇到一句新句子就靠人工補規則"
+        ), ascii(natural_sentence_service.compositionString)
 
         # Once a high-confidence word is resolved, later syllables cannot
         # reach backwards and alter it. The protected 優先級 spelling also
@@ -1143,7 +1216,9 @@ def main() -> None:
         sequence = type_readings(
             contextual_service, contextual_readings, sequence + 2
         )
-        assert contextual_service.compositionString == "你先開始下一步吧"
+        assert contextual_service.compositionString == "你先開始下一步吧", ascii(
+            contextual_service.compositionString
+        )
         assert not any(segment.locked for segment in contextual_service.segments)
 
         # The candidate editor may keep one whole-sentence correction, but it
@@ -1251,6 +1326,7 @@ def main() -> None:
         sequence = type_readings(
             buffered_literal, ["ㄋㄧˇ", "ㄢˊ"], sequence
         )
+        literal_prefix = buffered_literal.segments[0].text
         special_key(buffered_literal, 0x28, sequence)
         sequence += 1
         literal_index = next(
@@ -1263,11 +1339,11 @@ def main() -> None:
         )
         sequence += 1
         assert not literal_reply.get("commitString")
-        assert buffered_literal.compositionString == "你ㄢˊ"
+        assert buffered_literal.compositionString == literal_prefix + "ㄢˊ"
         trailing_tone = press(buffered_literal, "4", sequence)
         sequence += 1
         assert not trailing_tone.get("commitString")
-        assert buffered_literal.compositionString == "你ㄢˊˋ"
+        assert buffered_literal.compositionString == literal_prefix + "ㄢˊˋ"
 
         # Apply the dictionary-driven rule to every initial, medial, and rime,
         # not only examples reported by the user. Valid standalone forms must
@@ -1410,6 +1486,41 @@ def main() -> None:
         phrase_service.currentReply = {}
         phrase_service._bell("這個音節沒有有效候選")
         assert "showMessage" not in phrase_service.currentReply
+
+        # Beacon mode shrinks PIME's own candidate window to a position marker
+        # so the out-of-process window can anchor to it. Because that removes
+        # the real list from the only window PIME draws, it must engage only
+        # while the helper is proven alive, and it must never disturb the
+        # service's own state.
+        beacon_service = PinnedBopomofoTextService(DummyClient())
+        beacon_service.handleRequest(
+            {"method": "onActivate", "seqNum": 0, "isKeyboardOpen": False}
+        )
+        for index, key in enumerate("su3", start=1):
+            press(beacon_service, key, index)
+        beacon_service.candidate_ui._enabled = True
+
+        # Helper not proven alive: PIME must still receive the whole page.
+        beacon_service.candidate_ui._last_success = 0.0
+        open_reply = special_key(beacon_service, 0x28, 20)  # VK_DOWN
+        assert open_reply["showCandidates"] is True
+        full_page = list(open_reply["candidateList"])
+        assert len(full_page) > 1, full_page
+
+        # Helper alive: the wire value collapses to a single blank marker.
+        beacon_service.candidate_ui._last_success = time.monotonic()
+        beacon_reply = special_key(beacon_service, 0x28, 21)  # VK_DOWN
+        assert beacon_reply["candidateList"] == [" "], beacon_reply["candidateList"]
+        assert beacon_reply["candidateCursor"] == 0
+        # The real page must survive untouched for ranking and selection.
+        assert len(beacon_service.candidateList) > 1
+        assert " " not in beacon_service.candidateList
+
+        # Losing the helper restores the full page on the very next key.
+        beacon_service.candidate_ui._last_success = 0.0
+        restored_reply = special_key(beacon_service, 0x28, 22)  # VK_DOWN
+        assert restored_reply["candidateList"] != [" "]
+        assert len(restored_reply["candidateList"]) > 1
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

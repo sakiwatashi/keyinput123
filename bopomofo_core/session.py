@@ -57,6 +57,20 @@ class CandidateSession:
             return []
         return list(dict.fromkeys(converter(readings)))[: self.max_candidates]
 
+    def lexical_phrase_candidates(self, readings: list[str]) -> list[str]:
+        """Return only bundled phrases carrying explicit reading evidence."""
+        converter = getattr(self.provider, "lexical_phrase_candidates", None)
+        if converter is None:
+            return self.dictionary_phrase_candidates(readings)
+        return list(dict.fromkeys(converter(readings)))[: self.max_candidates]
+
+    def trusted_phrase_candidates(self, readings: list[str]) -> list[str]:
+        """Return phrases supported by exact readings and common usage."""
+        converter = getattr(self.provider, "trusted_phrase_candidates", None)
+        if converter is None:
+            return self.lexical_phrase_candidates(readings)
+        return list(dict.fromkeys(converter(readings)))[: self.max_candidates]
+
     def frequent_phrase_candidates(
         self, candidate_columns: list[list[str]]
     ) -> list[str]:
@@ -78,7 +92,7 @@ class CandidateSession:
         (for example, matching 貝殼 to ㄅㄟˋ ㄑㄩㄝˋ). Require the phrase engine's
         exact-reading evidence before a corpus match may affect live text.
         """
-        exact_phrases = set(self.phrase_candidates(readings))
+        exact_phrases = set(self.trusted_phrase_candidates(readings))
         if not exact_phrases:
             return []
         return [
@@ -90,6 +104,15 @@ class CandidateSession:
     def is_frequent_phrase(self, phrase: str) -> bool:
         validator = getattr(self.provider, "is_frequent_phrase", None)
         return bool(validator(phrase)) if validator is not None else False
+
+    def phrase_weight(self, readings: list[str], phrase: str) -> int:
+        lookup = getattr(self.provider, "phrase_weight", None)
+        if lookup is None:
+            return 0
+        try:
+            return max(0, int(lookup(readings, phrase)))
+        except (TypeError, ValueError):
+            return 0
 
     def _valid_pins(self, reading: str) -> list[str]:
         return [

@@ -100,6 +100,34 @@ class CommonUsageTests(unittest.TestCase):
                 ["ㄧㄡˉ", "ㄒㄧㄢˉ", "ㄐㄧˊ"], "優先及"
             ),
         )
+        self.assertEqual(
+            "優先",
+            apply_common_usage_overrides(["ㄧㄡˉ", "ㄒㄧㄢˉ"], "優仙"),
+        )
+
+    def test_feedback_backed_everyday_phrases(self) -> None:
+        examples = (
+            (["ㄨㄣˋ", "ㄊㄧˊ"], "問提", "問題"),
+            (["ㄎㄜˇ", "ㄧˇ"], "可已", "可以"),
+            (["ㄐㄧㄡˋ", "ㄎㄜˇ", "ㄧˇ"], "舊可已", "就可以"),
+            (["ㄐㄧㄡˋ", "ㄕˋ"], "舊是", "就是"),
+            (["ㄧㄣˉ", "ㄨㄟˋ"], "因未", "因為"),
+            (["ㄏㄡˋ", "ㄒㄩㄢˇ"], "後選", "候選"),
+            (["ㄍㄨㄟˉ", "ㄗㄜˊ"], "規擇", "規則"),
+            (["ㄒㄩㄢˇ", "ㄗㄜˊ"], "選則", "選擇"),
+            (["ㄕㄜˋ", "ㄐㄧˋ"], "設記", "設計"),
+            (["ㄕˊ", "ㄒㄧㄢˋ"], "時現", "實現"),
+            (["ㄓㄨˋ", "ㄧㄣˉ"], "住音", "注音"),
+            (["ㄎㄨㄥˋ", "ㄅㄞˊ", "ㄐㄧㄢˋ"], "空白劍", "空白鍵"),
+            (["ㄍㄨㄥˉ", "ㄋㄥˊ", "ㄐㄧㄢˋ"], "功能見", "功能鍵"),
+            (["ㄕˋ", "ㄐㄧㄝˋ", "ㄍㄨㄢˉ"], "事界觀", "世界觀"),
+        )
+        for readings, engine_result, expected in examples:
+            with self.subTest(expected=expected):
+                self.assertEqual(
+                    expected,
+                    apply_common_usage_overrides(readings, engine_result),
+                )
 
     def test_zai_rules_distinguish_unambiguous_traditional_usage(self) -> None:
         examples = (

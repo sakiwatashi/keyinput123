@@ -1,4 +1,5 @@
 ﻿$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $profileGuid = "{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $textServiceGuid = "{35F67E9D-A54D-4177-9697-8B0AB71A9E04}"
@@ -43,81 +44,19 @@ try {
         if (Test-Path -LiteralPath $launcher) {
             Start-Process -FilePath $launcher -ArgumentList "/quit" -Wait
         }
+        # The candidate window helper keeps its own executable open inside the
+        # module directory that is about to be removed.
+        Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $targetModule) {
             Remove-Item -LiteralPath $targetModule -Recurse -Force
         }
 
-        $nativeMarker = Join-Path $nativeStateRoot "native-ui.json"
-        $backupRoot = Join-Path $nativeStateRoot "backup"
-        $pendingRoot = Join-Path $nativeStateRoot "pending"
-        if ((Test-Path -LiteralPath $nativeMarker) -and (Test-Path -LiteralPath $backupRoot)) {
-            $nativeHashes = Get-Content -LiteralPath $nativeMarker -Raw -Encoding UTF8 |
-                ConvertFrom-Json
-            $nativeStateCanBeRemoved = $true
-            if (-not ("SmartPriorityNativeMethods" -as [type])) {
-                Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public static class SmartPriorityNativeMethods {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool MoveFileEx(
-        string existingFile,
-        string newFile,
-        int flags
-    );
-}
-"@
-            }
-            foreach ($architecture in @("x86", "x64")) {
-                $targetDll = Join-Path $resolvedRoot "$architecture\PIMETextService.dll"
-                $backupDll = Join-Path $backupRoot "$architecture\PIMETextService.dll"
-                $pendingDll = Join-Path $pendingRoot "$architecture\PIMETextService.dll"
-                $expectedHash = $nativeHashes.$architecture
-                if ((Test-Path -LiteralPath $targetDll) -and
-                    (Test-Path -LiteralPath $backupDll) -and
-                    (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash -eq
-                        (Get-FileHash -Algorithm SHA256 -LiteralPath $backupDll).Hash) {
-                    # A prior safe reinstall already restored PIME's signed
-                    # DLL. There is nothing left to overwrite.
-                    continue
-                }
-                elseif ((Test-Path -LiteralPath $targetDll) -and
-                    (Test-Path -LiteralPath $backupDll) -and
-                    $expectedHash -and
-                    (Get-FileHash -Algorithm SHA256 -LiteralPath $targetDll).Hash -eq $expectedHash) {
-                    try {
-                        Copy-Item -LiteralPath $backupDll -Destination $targetDll -Force
-                    }
-                    catch [System.IO.IOException], [System.UnauthorizedAccessException] {
-                        $restoreDll = Join-Path $nativeStateRoot "restore\$architecture\PIMETextService.dll"
-                        New-Item -ItemType Directory -Path (Split-Path -Parent $restoreDll) -Force | Out-Null
-                        Copy-Item -LiteralPath $backupDll -Destination $restoreDll -Force
-                        $scheduled = [SmartPriorityNativeMethods]::MoveFileEx(
-                            $restoreDll,
-                            $targetDll,
-                            0x4 -bor 0x1
-                        )
-                        if (-not $scheduled) {
-                            $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                            throw "Unable to schedule the $architecture native UI restore (Win32 $win32Error)."
-                        }
-                        $nativeStateCanBeRemoved = $false
-                    }
-                }
-                elseif ($nativeHashes.($architecture + "Pending") -and
-                    (Test-Path -LiteralPath $pendingDll)) {
-                    # Removing the persistent source cancels a replacement
-                    # that Windows has not performed yet.
-                    Remove-Item -LiteralPath $pendingDll -Force
-                }
-                else {
-                    # A third party changed the shared DLL. Preserve our
-                    # backup rather than overwriting or deleting evidence.
-                    $nativeStateCanBeRemoved = $false
-                }
-            }
+        if ((Test-Path -LiteralPath (Join-Path $nativeStateRoot "native-ui.json")) -and
+            (Test-Path -LiteralPath (Join-Path $nativeStateRoot "backup"))) {
+            Restore-OriginalPimeTextService `
+                -PimeRoot $resolvedRoot `
+                -StateRoot $nativeStateRoot | Out-Null
             foreach ($architecture in @("x86", "x64")) {
                 $dll = Join-Path $resolvedRoot "$architecture\PIMETextService.dll"
                 if (-not (Test-Path -LiteralPath $dll)) { continue }
@@ -127,9 +66,6 @@ public static class SmartPriorityNativeMethods {
                     Join-Path $env:WINDIR "System32\regsvr32.exe"
                 }
                 & $regsvr /s $dll
-            }
-            if ($nativeStateCanBeRemoved -and (Test-Path -LiteralPath $nativeStateRoot)) {
-                Remove-Item -LiteralPath $nativeStateRoot -Recurse -Force
             }
         }
     }

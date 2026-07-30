@@ -9,7 +9,7 @@ from bopomofo_core.autocorrect import Autocorrector
 class AutocorrectTests(unittest.TestCase):
     def test_bundled_rules_correct_high_confidence_typos(self) -> None:
         autocorrector = Autocorrector()
-        self.assertGreaterEqual(autocorrector.rule_count, 40)
+        self.assertGreaterEqual(autocorrector.rule_count, 60)
         self.assertTrue(
             {"因該", "音該", "英該"}.isdisjoint(
                 rule.wrong for rule in autocorrector.rules
@@ -21,6 +21,18 @@ class AutocorrectTests(unittest.TestCase):
             ["以經", "迫不急待"],
             [c.wrong for c in changes],
         )
+        # Feedback-reviewed everyday tech typos must correct live without
+        # waiting for the candidate menu.
+        feedback_cases = (
+            ("這個問提舊是可已設記", "這個問題就是可以設計"),
+            ("空白劍跟功能見", "空白鍵跟功能鍵"),
+            ("優先註音", "優先注音"),
+            ("舊可已後選", "就可以候選"),
+        )
+        for wrong, expected in feedback_cases:
+            with self.subTest(wrong=wrong):
+                fixed, _ = autocorrector.correct(wrong)
+                self.assertEqual(expected, fixed)
 
     def test_explicitly_selected_character_protects_the_whole_rule_span(self) -> None:
         autocorrector = Autocorrector()

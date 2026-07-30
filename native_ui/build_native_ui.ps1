@@ -24,6 +24,14 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $nativeRoot "src\CandidateWindow.cpp") `
         -Destination (Join-Path $resolvedBuild "libIME2\src\CandidateWindow.cpp") -Force
+    # Force-show the Japanese vertical candidate window (ignore app UI-element
+    # takeover) and set product defaults for candPerRow / font.
+    $pimeTextServiceCpp = Join-Path $nativeRoot "src\PIMETextService.cpp"
+    if (-not (Test-Path -LiteralPath $pimeTextServiceCpp)) {
+        throw "Missing native UI source: $pimeTextServiceCpp"
+    }
+    Copy-Item -LiteralPath $pimeTextServiceCpp `
+        -Destination (Join-Path $resolvedBuild "PIMETextService\PIMETextService.cpp") -Force
     Copy-Item -LiteralPath (Join-Path $nativeRoot "src\CMakeLists.txt") `
         -Destination (Join-Path $resolvedBuild "CMakeLists.txt") -Force
 

@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "description": "Reviewed Taiwan usages missing from the upstream phrase table",
+    "policy": "Every row requires a public source demonstrating the exact Traditional Chinese usage and a regression test"
+  },
+  "entries": [
+    {
+      "phrase": "層數",
+      "readings": ["ㄘㄥˊ", "ㄕㄨˋ"],
+      "weight": 500,
+      "source": "https://dict.concised.moe.edu.tw/dictView.jsp?ID=9931&la=1&powerMode=0"
+    }
+  ]
+}
