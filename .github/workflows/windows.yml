@@ -28,6 +28,9 @@ jobs:
       - name: Test signed text-service restore ownership
         shell: powershell
         run: .\tests\restore_signed_text_service_smoke.ps1
+      - name: Test candidate UI foreground policy
+        shell: powershell
+        run: .\tests\candidate_ui_policy_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1

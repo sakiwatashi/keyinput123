@@ -17,10 +17,12 @@
 #endif
 
 #include "CandidateRenderer.h"
+#include "ForegroundPolicy.h"
 #include "PipeServer.h"
 
 #include <windows.h>
 #include <shellapi.h>
+#include <windowsx.h>
 
 #include <string>
 #include <vector>
@@ -69,6 +71,9 @@ struct AppState {
     // Until the Python layer has sent something, the window stays hidden rather
     // than showing stale placeholder text over a real composition.
     bool hasCandidates = false;
+    // Whether the pipe is currently accepting updates. Starts closed so the
+    // foreground application is judged before anything is served.
+    bool serving = false;
 };
 
 AppState g_state;
@@ -198,10 +203,41 @@ void hideWindow(AppState& state) {
     state.visible = false;
 }
 
+// Opens or closes the pipe according to what is in the foreground.
+//
+// Declining to draw is not enough on its own. Beacon mode shrinks PIME's own
+// candidate window, and the Python layer keeps it shrunken for as long as its
+// writes keep succeeding. A helper that accepted updates while refusing to
+// display them would leave a blocked application with candidates in neither
+// window. Refusing the pipe is therefore the signal: the writes fail, the
+// Python layer retracts beacon mode, and PIME's own full candidate list comes
+// back for that application.
+void updateServingState(AppState& state) {
+    if (state.demoMode)
+        return;
+    bool allowed = SmartPriority::foregroundAllowsCandidateWindow();
+    if (allowed == state.serving)
+        return;
+
+    state.serving = allowed;
+    if (allowed) {
+        state.pipe.start(kPipeName, state.hwnd);
+    } else {
+        state.pipe.stop();
+        state.hasCandidates = false;
+        state.hasLastAnchor = false;
+        hideWindow(state);
+    }
+}
+
 void syncToBeacon(AppState& state) {
     if (state.demoMode)
         return;
     if (!state.hasCandidates) {
+        hideWindow(state);
+        return;
+    }
+    if (!state.serving) {
         hideWindow(state);
         return;
     }
@@ -253,17 +289,60 @@ void onPaint(AppState& state) {
     ::EndPaint(state.hwnd, &ps);
 }
 
+// Turns a click into the selection key the input method already handles.
+//
+// Synthesising the digit reuses the existing selection path exactly, so mouse
+// and keyboard cannot drift apart, and it needs no reverse channel on a pipe
+// that is deliberately one-way. The window is WS_EX_NOACTIVATE, so focus stays
+// with the application and the key reaches it through TSF as usual.
+//
+// This runs only while the foreground application is one the policy allows, so
+// no input is ever synthesised into a game.
+void selectCandidateByClick(AppState& state, POINT point) {
+    if (!state.serving || !state.visible)
+        return;
+    int index = state.renderer.hitTest(point);
+    if (index < 0 || index > 9)
+        return;
+
+    WORD key = index == 9 ? 0x30 : static_cast<WORD>(0x31 + index);
+    INPUT strokes[2] = {};
+    strokes[0].type = INPUT_KEYBOARD;
+    strokes[0].ki.wVk = key;
+    strokes[1].type = INPUT_KEYBOARD;
+    strokes[1].ki.wVk = key;
+    strokes[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    ::SendInput(2, strokes, sizeof(INPUT));
+}
+
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT:
         onPaint(g_state);
         return 0;
+    case WM_LBUTTONUP: {
+        POINT point = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        selectCandidateByClick(g_state, point);
+        return 0;
+    }
+    case WM_MOUSEMOVE: {
+        // Highlight what the click would choose, so the mapping is visible
+        // before committing to it.
+        POINT point = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        int index = g_state.renderer.hitTest(point);
+        if (index >= 0 && index != g_state.renderer.selection()) {
+            g_state.renderer.setSelection(index);
+            ::InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
     case WM_ERASEBKGND:
         return TRUE;
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_TIMER:
         if (wp == kPollTimerId) {
+            updateServingState(g_state);
             syncToBeacon(g_state);
         } else if (wp == kTopmostTimerId && g_state.visible) {
             ::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -349,6 +428,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             g_state.demoOrigin.y = 400;
         } else if (argument.rfind(L"--candidates=", 0) == 0) {
             candidates = parseCandidates(argument.substr(13));
+        } else if (argument.rfind(L"--check-policy=", 0) == 0) {
+            // Lets the foreground rules be exercised against a named process
+            // without launching the game they describe. This is a GUI
+            // subsystem binary with no console, so the verdict is the exit
+            // code: 2 blocked, 0 allowed.
+            std::wstring name = argument.substr(15);
+            bool blocked = SmartPriority::processNameIsBlocked(name.c_str());
+            if (argv != nullptr)
+                ::LocalFree(argv);
+            return blocked ? 2 : 0;
         }
     }
     if (argv != nullptr)
@@ -395,7 +484,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         g_state.hasCandidates = true;
         layoutAndShow(g_state, g_state.demoOrigin, nullptr);
     } else {
-        g_state.pipe.start(kPipeName, g_state.hwnd);
+        // The pipe is opened by the policy check, not here, so a helper started
+        // while a blocked application is in front never serves it.
+        updateServingState(g_state);
         HWINEVENTHOOK hook = ::SetWinEventHook(
             EVENT_OBJECT_SHOW, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
             winEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);

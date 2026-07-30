@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(SmartPriorityCandidateUI WIN32
     src/main.cpp
     src/CandidateRenderer.cpp
+    src/ForegroundPolicy.cpp
     src/PipeServer.cpp
 )
 
