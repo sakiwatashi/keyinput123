@@ -7,12 +7,20 @@ There are two implementations of the Japanese-inspired candidate window here.
   draws the vertical-first grid in its own process and never loads into
   another application. Every process, games included, keeps only PIME's
   original signed `PIMETextService.dll`. See `../OUT_OF_PROCESS_UI_DESIGN.md`.
-- **`src/` — in-process (legacy, discouraged).** A rebuilt
+- **`src/` — in-process (legacy, no longer published).** A rebuilt
   `PIMETextService.dll`. Because a TSF text service is loaded into every
   application that accepts text, this unsigned DLL also enters game processes.
   VALORANT's Vanguard force-unloaded it mid-process and the game crashed with
   a BEX64 fault; that incident is what the out-of-process design exists to
-  remove. It is kept for reference and for the explicit opt-in below.
+  remove.
+
+  `src/`, `bin/` and `build_native_ui.ps1` are **not tracked in the
+  repository**, so a fresh clone and every published installer are built
+  without them. A developer who wants `-EnableUnsignedNativeUi` can rebuild
+  them locally; `build_pime_overlay.ps1` picks the payload up when it is
+  present and skips it when it is not. Binary and source travel together or
+  not at all, because the DLL is LGPL-derived — the build refuses a payload
+  that has one without the other.
 
 The rest of this file describes the legacy in-process build.
 

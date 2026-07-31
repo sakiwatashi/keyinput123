@@ -30,7 +30,10 @@
   PIME 的 `server.py` 是單執行緒服務所有應用程式，一次阻塞會凍結全系統打字。
 - `tests/`：核心與 PIME 整合測試。
 - `installer/`：正式安裝與解除安裝流程。
-- `native_ui/`：候選框的完整 LGPL 原始碼、可重現建置腳本及 x86/x64 產物。
+- `native_ui/`：候選框的 LGPL 授權與說明。**舊的行程內 DLL(`src/`、`bin/`、
+  `build_native_ui.ps1`)已不再納入版控**,發布的安裝程式一律不含它;開發者若要
+  使用 `-EnableUnsignedNativeUi` 可自行在本機重建,`build_pime_overlay.ps1` 有就
+  收、沒有就略過。二進位與原始碼必須同進退(LGPL),建置會拒絕只有其中一邊的組合。
 - `native_ui/helper/`：**行程外**候選視窗（C++／Win32／GDI，不含 TSF 或 COM）。
   日式直向候選框改由這個獨立行程繪製，讓所有應用程式（含遊戲）行程內只留 PIME
   原廠簽章 DLL。設計與實測數據見 `OUT_OF_PROCESS_UI_DESIGN.md`。

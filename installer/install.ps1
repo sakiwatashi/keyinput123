@@ -175,7 +175,13 @@ try {
         (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x64\PIMETextService.dll"))
     )
     if ($useUnsignedNativeUi -and -not $canInstallNativeUi) {
-        throw "The remembered custom candidate UI cannot be installed because its payload is missing or unrelated PIME modules are present."
+        throw ("The remembered custom candidate UI cannot be installed. " +
+            "The published installer no longer carries the unsigned in-process " +
+            "DLL; the candidate window now runs out of process instead. Either " +
+            "build the overlay from a source tree that still has " +
+            "native_ui\bin, or run this installer with -DisableUnsignedNativeUi " +
+            "to return to the signed PIME binaries. Unrelated PIME input-method " +
+            "modules also block it.")
     }
     if ($canInstallNativeUi) {
         # An earlier rollback may still hold a reboot-time signed restore in

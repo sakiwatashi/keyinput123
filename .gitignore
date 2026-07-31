@@ -6,3 +6,11 @@ release/
 release-staging/
 tmp/
 *.log
+
+# Legacy in-process candidate DLL. The out-of-process helper replaced it, and
+# shipping an unsigned text-service DLL is what got a game killed by its
+# anti-cheat. A local build may still be kept to use -EnableUnsignedNativeUi;
+# it just is not published. native_ui/helper/ is unaffected.
+native_ui/bin/
+native_ui/src/
+native_ui/build_native_ui.ps1

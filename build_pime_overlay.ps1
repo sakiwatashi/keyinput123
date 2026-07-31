@@ -64,18 +64,41 @@ New-Item -ItemType Directory -Path $helperDest -Force | Out-Null
 Copy-Item -LiteralPath $helperSource -Destination $helperDest -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "native_ui\LGPL-2.0.txt") -Destination $helperDest -Force
 
+# The legacy in-process candidate DLL is no longer tracked in the repository:
+# the out-of-process helper replaced it, and shipping an unsigned text-service
+# DLL is what got a game killed by its anti-cheat. A developer may still keep
+# a local build to use `-EnableUnsignedNativeUi`, so the payload is optional
+# rather than absent.
+#
+# Its source ships with it or not at all. The DLL is LGPL-derived, so a build
+# that carries the binary must also carry the source it was built from.
 $nativeUiSource = Join-Path $projectRoot "native_ui"
 $nativeUiDest = Join-Path $distRoot "native_ui"
-foreach ($required in @(
+New-Item -ItemType Directory -Path $nativeUiDest -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $nativeUiSource "LGPL-2.0.txt") -Destination $nativeUiDest -Force
+Copy-Item -LiteralPath (Join-Path $nativeUiSource "README.md") -Destination $nativeUiDest -Force
+
+$legacyParts = @(
     (Join-Path $nativeUiSource "bin\x86\PIMETextService.dll"),
     (Join-Path $nativeUiSource "bin\x64\PIMETextService.dll"),
-    (Join-Path $nativeUiSource "src\CandidateWindow.cpp"),
-    (Join-Path $nativeUiSource "LGPL-2.0.txt")
-)) {
-    if (-not (Test-Path -LiteralPath $required)) {
-        throw "The native candidate UI payload is missing: $required"
+    (Join-Path $nativeUiSource "src\CandidateWindow.cpp")
+)
+$presentParts = @($legacyParts | Where-Object { Test-Path -LiteralPath $_ })
+if ($presentParts.Count -eq $legacyParts.Count) {
+    Copy-Item -LiteralPath (Join-Path $nativeUiSource "bin") `
+        -Destination (Join-Path $nativeUiDest "bin") -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $nativeUiSource "src") `
+        -Destination (Join-Path $nativeUiDest "src") -Recurse -Force
+    if (Test-Path -LiteralPath (Join-Path $nativeUiSource "build_native_ui.ps1")) {
+        Copy-Item -LiteralPath (Join-Path $nativeUiSource "build_native_ui.ps1") `
+            -Destination $nativeUiDest -Force
     }
+    Write-Output "Included the local legacy in-process candidate DLL."
 }
-Copy-Item -LiteralPath $nativeUiSource -Destination $nativeUiDest -Recurse -Force
+elseif ($presentParts.Count -gt 0) {
+    throw ("The legacy candidate DLL payload is incomplete. Ship the binary " +
+        "and its LGPL source together, or neither: " +
+        (($legacyParts | Where-Object { -not (Test-Path -LiteralPath $_) }) -join ", "))
+}
 
 Write-Output $distRoot
