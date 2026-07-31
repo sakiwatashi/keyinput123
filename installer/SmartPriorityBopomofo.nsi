@@ -3,7 +3,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 !define PRODUCT_NAME "智慧優先注音"
-!define PRODUCT_VERSION "0.6.4"
+!define PRODUCT_VERSION "0.6.5"
 !define PRODUCT_PUBLISHER "Smart Priority Bopomofo contributors"
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
 
@@ -14,7 +14,7 @@ InstallDirRegKey HKLM "${PRODUCT_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.6.4.0"
+VIProductVersion "0.6.5.0"
 VIAddVersionKey /LANG=1028 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1028 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1028 "FileDescription" "${PRODUCT_NAME} 安裝程式"
@@ -28,6 +28,13 @@ VIAddVersionKey /LANG=1028 "LegalCopyright" "Copyright (c) 2026 Smart Priority B
 
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_NOAUTOCLOSE
+
+; The directory below holds only the uninstaller and the install scripts. The
+; input method itself must live under PIME for Windows to load it, and PIME's
+; location comes from its own registry key, so it is not a choice this page can
+; offer. Saying so here stops the page from promising something it cannot do.
+!define MUI_DIRECTORYPAGE_TEXT_TOP "選擇存放解除安裝程式與安裝腳本的資料夾。$\r$\n$\r$\n注意：輸入法本體會安裝到 PIME 所在的位置（由 PIME 自行決定），不會安裝到這裡。這個選擇不會改變輸入法的安裝位置。"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\release-staging\THIRD_PARTY_NOTICES.txt"
 !insertmacro MUI_PAGE_DIRECTORY
@@ -39,6 +46,32 @@ VIAddVersionKey /LANG=1028 "LegalCopyright" "Copyright (c) 2026 Smart Priority B
 !insertmacro MUI_UNPAGE_FINISH
 
 !insertmacro MUI_LANGUAGE "TradChinese"
+
+; Running the installer over an existing installation used to reinstall
+; silently, with no hint that anything was already there and no way to remove
+; it from here. Windows Installer packages offer repair/remove in that
+; situation; NSIS does not unless it is written, so it is written here.
+; Plain NSIS branching rather than LogicLib: MessageBox dispatches to labels,
+; and labels declared inside a ${If} block are a known source of subtle
+; mis-compiles.
+Function .onInit
+    ReadRegStr $R0 HKLM "${PRODUCT_KEY}" "UninstallString"
+    StrCmp $R0 "" SmartPriorityFresh
+    ReadRegStr $R1 HKLM "${PRODUCT_KEY}" "DisplayVersion"
+    ReadRegStr $R2 HKLM "${PRODUCT_KEY}" "InstallLocation"
+    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION \
+        "這台電腦已經安裝「${PRODUCT_NAME} $R1」。$\r$\n$\r$\n[是] 重新安裝／更新為 ${PRODUCT_VERSION}$\r$\n[否] 解除安裝現有版本$\r$\n[取消] 結束$\r$\n$\r$\n無論選哪一項，%APPDATA%\PinnedBopomofo 的個人學習資料都會保留。" \
+        /SD IDYES IDYES SmartPriorityFresh IDNO SmartPriorityRemove
+    Abort
+
+SmartPriorityRemove:
+    ; _?= keeps the uninstaller in its own directory so ExecWait really waits;
+    ; without it the uninstaller copies itself to TEMP and returns immediately.
+    ExecWait '$R0 _?=$R2'
+    Abort
+
+SmartPriorityFresh:
+FunctionEnd
 
 Section "安裝智慧優先注音" SEC_MAIN
     SetShellVarContext current
@@ -77,6 +110,14 @@ Section "安裝智慧優先注音" SEC_MAIN
 
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
+    ; The Start menu folder previously held only the feedback tool, so the
+    ; product looked like it had no way to remove itself. install.ps1 creates
+    ; the same folder for that tool; both entries live together.
+    CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
+    CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}\解除安裝${PRODUCT_NAME}.lnk" \
+        "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0 \
+        SW_SHOWNORMAL "" "移除智慧優先注音，保留個人學習資料"
+
     WriteRegStr HKLM "${PRODUCT_KEY}" "DisplayName" "${PRODUCT_NAME}"
     WriteRegStr HKLM "${PRODUCT_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
     WriteRegStr HKLM "${PRODUCT_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
@@ -99,6 +140,11 @@ Section "Uninstall"
         MessageBox MB_ICONSTOP|MB_OK "解除安裝未完成（結束碼 $0）。詳細記錄：%ProgramData%\SmartPriorityBopomofo\uninstall.log"
         Abort
     ${EndIf}
+    Delete "$SMPROGRAMS\${PRODUCT_NAME}\解除安裝${PRODUCT_NAME}.lnk"
+    ; uninstall.ps1 removes the feedback-tool shortcut and the folder when it
+    ; is empty, but it runs before this line, so the folder still held our own
+    ; shortcut at that point. Remove it here if nothing else is left.
+    RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
     DeleteRegKey HKLM "${PRODUCT_KEY}"
     RMDir /r "$INSTDIR"
 SectionEnd
