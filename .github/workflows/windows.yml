@@ -34,6 +34,9 @@ jobs:
       - name: Test installer packages every script it loads
         shell: powershell
         run: .\tests\installer_payload_smoke.ps1
+      - name: Test licence encoding and version consistency
+        shell: powershell
+        run: .\tests\release_consistency_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1
@@ -55,5 +58,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/Smart-Priority-Bopomofo-Setup-0.6.3.exe
+            release/Smart-Priority-Bopomofo-Setup-0.6.4.exe
             release/SHA256SUMS.txt

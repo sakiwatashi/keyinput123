@@ -42,7 +42,7 @@ Git Bash 使用者可把最後一行改為 `./install.sh`。
 一般使用者只需要執行發佈資料夾中的：
 
 ```text
-Smart-Priority-Bopomofo-Setup-0.6.3.exe
+Smart-Priority-Bopomofo-Setup-0.6.4.exe
 ```
 
 從 GitHub clone 原始碼後，可在 PowerShell 執行一鍵安裝：
