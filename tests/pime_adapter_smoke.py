@@ -299,6 +299,19 @@ def force_composition_text(service, text: str, *, locked: bool = True) -> None:
 def main() -> None:
     with tempfile.TemporaryDirectory() as appdata:
         os.environ["APPDATA"] = appdata
+        # The out-of-process mirror ships enabled. Left at that default, the
+        # shared client would race to connect to any real helper running on
+        # the developing machine and rewrite candidate lists into beacon
+        # blanks mid-smoke. Pin the preference off for the whole run; the
+        # beacon section below enables the flag explicitly on its own.
+        preference_root = os.path.join(appdata, "PinnedBopomofo")
+        os.makedirs(preference_root, exist_ok=True)
+        with open(
+            os.path.join(preference_root, "candidate-ui.json"),
+            "w",
+            encoding="utf-8",
+        ) as preference_handle:
+            preference_handle.write('{"enabled": false}')
         service = PinnedBopomofoTextService(DummyClient())
 
         # Match Microsoft Bopomofo's vertical-first grid: 1-5 in the left
@@ -1580,6 +1593,9 @@ def main() -> None:
         restored_reply = special_key(beacon_service, 0x28, 22)  # VK_DOWN
         assert restored_reply["candidateList"] != [" "]
         assert len(restored_reply["candidateList"]) > 1
+        # Hand the shared mirror back to the pinned-off state so later
+        # sections stay deterministic on machines with a live helper.
+        beacon_service.candidate_ui._enabled = False
 
         # The mirror is cosmetic and runs on every key event, so a fault inside
         # it must not take the keystroke down with it.

@@ -24,8 +24,9 @@
 輔助程式覆蓋。完整設計、實測數據與被推翻的方案記錄在
 `OUT_OF_PROCESS_UI_DESIGN.md`。
 
-**預設關閉。** 需要 `%APPDATA%\PinnedBopomofo\candidate-ui.json` 設
-`{"enabled": true}` 並重啟 PIME。
+**預設開啟**（0.6.5 發布後應真實使用者回饋改為預設；只有明確的
+`{"enabled": false}` 會關閉，檔案不存在或損壞一律視為開啟）。要關閉：
+`%APPDATA%\PinnedBopomofo\candidate-ui.json` 設 `{"enabled": false}` 並重啟 PIME。
 
 ### 標點鍵位對齊微軟注音
 

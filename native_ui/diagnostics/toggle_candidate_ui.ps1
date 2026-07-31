@@ -16,14 +16,16 @@ $configPath = Join-Path $configDirectory "candidate-ui.json"
 $launcher = "C:\Program Files (x86)\PIME\PIMELauncher.exe"
 
 function Get-CandidateUiState {
-    if (-not (Test-Path -LiteralPath $configPath)) { return $false }
+    # 預設開啟：只有明確的 enabled: false 會關閉，與模組的讀取規則一致。
+    if (-not (Test-Path -LiteralPath $configPath)) { return $true }
     try {
         $value = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        return [bool]$value.enabled
+        if ($null -ne $value.enabled) { return [bool]$value.enabled }
+        return $true
     }
     catch {
-        # A damaged preference means off, matching the module's own reading.
-        return $false
+        # A damaged preference means the default (on), matching the module.
+        return $true
     }
 }
 
@@ -49,9 +51,10 @@ if ($On) {
     Write-Output "若輔助程式未啟動,系統會自動退回原廠候選框,打字不受影響。"
 }
 else {
-    if (Test-Path -LiteralPath $configPath) {
-        Remove-Item -LiteralPath $configPath -Force
-    }
+    # 預設是開啟，所以「關閉」必須寫入明確的 false；刪除偏好檔等於回到預設（開啟）。
+    New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+    @{ enabled = $false; version = 1 } | ConvertTo-Json |
+        Set-Content -LiteralPath $configPath -Encoding UTF8
     Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.Id -Force }
     Write-Output "已關閉。打字行為回到與此功能不存在時完全相同。"

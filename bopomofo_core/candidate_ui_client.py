@@ -30,10 +30,12 @@ import time
 
 PIPE_NAME = r"\\.\pipe\SmartPriorityBopomofo.CandidateUI"
 
-# While the out-of-process window is incomplete it must not affect ordinary
-# typing. PIME's own candidate window is still shown, so running both at once
-# puts two overlapping windows on screen. The mirror therefore stays off unless
-# the user opts in, and an absent or damaged preference means off.
+# The out-of-process window ships enabled: the first real users read an opt-in
+# hidden in a JSON file as "the feature was never installed". The default is
+# safe because failure falls back, not forward — when the helper is missing or
+# will not start, PIME's own signed candidate window stays in charge and typing
+# is unaffected. Only an explicit {"enabled": false} turns the mirror off; an
+# absent, incomplete, or damaged preference means the default, that is, on.
 CONFIG_NAME = "candidate-ui.json"
 
 _FIELD_SEPARATOR = "\x1f"
@@ -51,7 +53,7 @@ def default_config_path() -> str:
 
 
 def mirror_enabled(config_path: str | None = None) -> bool:
-    """Reads the opt-in switch. Any problem reading it means disabled.
+    """Reads the opt-out switch. Only an explicit false disables.
 
     Read once when the client is built, never on the typing path, because disk
     access during a key event would stall the host application's input thread.
@@ -61,12 +63,12 @@ def mirror_enabled(config_path: str | None = None) -> bool:
     try:
         # utf-8-sig, not utf-8: Windows PowerShell writes this file with a BOM,
         # and json.load rejects the BOM as a stray character. Reading it as
-        # plain utf-8 made a correctly written "enabled": true silently parse
-        # as disabled.
+        # plain utf-8 made a correctly written preference silently fall back
+        # to the default.
         with open(path, "r", encoding="utf-8-sig") as handle:
-            return bool(json.load(handle).get("enabled"))
+            return bool(json.load(handle).get("enabled", True))
     except Exception:
-        return False
+        return True
 
 
 def default_helper_path() -> str:

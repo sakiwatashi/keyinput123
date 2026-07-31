@@ -128,8 +128,12 @@ class HelperLaunchTest(unittest.TestCase):
         client.close()
 
 
-class OptInTest(unittest.TestCase):
-    """The mirror is incomplete, so it must be inert until asked for."""
+class DefaultOnTest(unittest.TestCase):
+    """The mirror ships on; only an explicit false may switch it off.
+
+    The default is safe because a missing or broken helper falls back to
+    PIME's own signed candidate window without affecting typing.
+    """
 
     def _config(self, body: str) -> str:
         import tempfile
@@ -142,11 +146,16 @@ class OptInTest(unittest.TestCase):
         self.addCleanup(os.unlink, handle.name)
         return handle.name
 
-    def test_missing_config_is_disabled(self):
-        self.assertFalse(mirror_enabled(r"C:\nowhere\candidate-ui.json"))
+    def test_missing_config_is_enabled(self):
+        self.assertTrue(mirror_enabled(r"C:\nowhere\candidate-ui.json"))
 
-    def test_damaged_config_is_disabled(self):
-        self.assertFalse(mirror_enabled(self._config("{not json")))
+    def test_damaged_config_is_enabled(self):
+        # A broken preference must not silently remove the shipped UI; the
+        # helper fallback keeps typing safe either way.
+        self.assertTrue(mirror_enabled(self._config("{not json")))
+
+    def test_missing_key_is_enabled(self):
+        self.assertTrue(mirror_enabled(self._config('{"version": 1}')))
 
     def test_explicit_false_is_disabled(self):
         self.assertFalse(mirror_enabled(self._config('{"enabled": false}')))
