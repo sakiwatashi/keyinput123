@@ -55,5 +55,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/Smart-Priority-Bopomofo-Setup-0.6.2.exe
+            release/Smart-Priority-Bopomofo-Setup-0.6.3.exe
             release/SHA256SUMS.txt

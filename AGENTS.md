@@ -79,8 +79,16 @@ When PIME is installed, also run:
   Rime/McBopomofo occurrence weights before the legacy engine.
   A stored single-character pin stays candidate zero for isolated input but
   is not a context lock; a reliable word or whole-buffer conversion may
-  override it. Only a choice made explicitly in the current composition or a
-  learned personal phrase locks its covered segments.
+  override it. Only a choice made explicitly in the current composition
+  locks its covered segments.
+- A learned personal phrase wins its own span and nothing wider. In the
+  lattice it is scored just above the strongest bundled option for the same
+  readings, and personal origin is the last tiebreaker rather than the first.
+  Ranking personal origin first made any learned pair unbeatable, so a phrase
+  learned in one sentence dismantled a far stronger word in another: 電話
+  (weight 50001) lost to a learned 化一 (weight 0) and 電話一 came out as
+  店化一. Never give a personal phrase an unbounded weight or restore it to
+  the front of the score tuple.
   Automatic commits must not silently teach the personal stores.
 - Single-character ranking preserves libchewing's reading-aware dictionary
   default, then uses global Taiwan frequency for the remaining tail. Global

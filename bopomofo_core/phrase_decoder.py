@@ -22,19 +22,29 @@ class DecodedSpan:
 
 @dataclass(frozen=True)
 class _Path:
-    personal_characters: int
-    lexical_characters: int
+    covered_characters: int
     compaction: int
     frequency_score: float
+    personal_characters: int
     spans: tuple[DecodedSpan, ...]
 
     @property
-    def score(self) -> tuple[int, int, int, float]:
+    def score(self) -> tuple[int, int, float, int]:
+        """Coverage, then span length, then frequency, then personal origin.
+
+        Personal origin is the last tiebreaker rather than the first. Ranking
+        it first made any learned pair unbeatable, so a phrase learned in one
+        context could dismantle a far stronger word somewhere else: 電話
+        (weight 50001) lost to a learned 化一 (weight 0) simply because the
+        latter was personal, and 電話一 came out as 店化一. A personal phrase
+        still wins its own span -- see the weight it is given below -- but it
+        no longer makes that span more attractive than the lexicon says it is.
+        """
         return (
-            self.personal_characters,
-            self.lexical_characters,
+            self.covered_characters,
             self.compaction,
             self.frequency_score,
+            self.personal_characters,
         )
 
 
@@ -49,10 +59,15 @@ def decode_phrase_lattice(
 ) -> list[DecodedSpan]:
     """Return the best non-overlapping phrase segmentation.
 
-    Explicitly learned personal phrases are strongest.  Bundled phrases then
-    maximize exact-reading coverage, followed by longer coherent spans and
-    source frequency.  Single characters remain a lossless fallback, so the
-    decoder never needs an entire sentence to exist as one dictionary row.
+    Segmentations are compared by exact-reading coverage, then by how much of
+    that coverage comes from longer coherent spans, then by source frequency.
+    Single characters remain a lossless fallback, so the decoder never needs
+    an entire sentence to exist as one dictionary row.
+
+    An explicitly learned personal phrase always wins its own span: it is
+    scored just above the strongest bundled option for the same readings.
+    It is deliberately not scored higher than that, so a phrase learned in one
+    context cannot outbid an unrelated, much stronger word next to it.
     """
     count = len(readings)
     if count != len(current_text) or count != len(protected):
@@ -61,7 +76,7 @@ def decode_phrase_lattice(
         return []
 
     paths: list[_Path | None] = [None] * (count + 1)
-    paths[0] = _Path(0, 0, 0, 0.0, ())
+    paths[0] = _Path(0, 0, 0.0, 0, ())
     for start in range(count):
         path = paths[start]
         if path is None:
@@ -71,10 +86,10 @@ def decode_phrase_lattice(
         # It forms a hard boundary and cannot be swallowed by a phrase edge.
         single = DecodedSpan(start, start + 1, current_text[start])
         single_path = _Path(
-            path.personal_characters,
-            path.lexical_characters,
+            path.covered_characters,
             path.compaction,
             path.frequency_score,
+            path.personal_characters,
             path.spans + (single,),
         )
         if paths[start + 1] is None or single_path.score > paths[start + 1].score:
@@ -91,16 +106,30 @@ def decode_phrase_lattice(
             personal = personal_lookup(span_readings)
             candidates = phrase_lookup(span_readings)
             options = ([personal] if personal else []) + candidates
+            best_bundled = 0
+            for option in candidates:
+                if len(option) == width:
+                    best_bundled = max(
+                        best_bundled, max(0, phrase_weight(span_readings, option))
+                    )
             for phrase in dict.fromkeys(options):
                 if len(phrase) != width:
                     continue
                 is_personal = bool(personal and phrase == personal)
-                weight = max(0, phrase_weight(span_readings, phrase))
+                if is_personal:
+                    # The user's answer for this span outranks every bundled
+                    # option for the same span, and nothing more. Giving it an
+                    # unbounded weight would let a pair learned elsewhere
+                    # outbid a much stronger neighbouring word and change text
+                    # the user never chose.
+                    weight = best_bundled + 1
+                else:
+                    weight = max(0, phrase_weight(span_readings, phrase))
                 candidate_path = _Path(
-                    path.personal_characters + (width if is_personal else 0),
-                    path.lexical_characters + (0 if is_personal else width),
+                    path.covered_characters + width,
                     path.compaction + max(0, width - 1),
                     path.frequency_score + math.log1p(weight),
+                    path.personal_characters + (width if is_personal else 0),
                     path.spans
                     + (DecodedSpan(start, end, phrase, is_personal),),
                 )

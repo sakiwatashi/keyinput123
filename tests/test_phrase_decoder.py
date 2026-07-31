@@ -80,6 +80,64 @@ class PhraseDecoderTests(unittest.TestCase):
         self.assertEqual("".join(span.text for span in spans), "自訂")
         self.assertTrue(spans[0].personal)
 
+    def test_personal_phrase_cannot_dismantle_a_stronger_neighbour(self):
+        """A pair learned in one context must not rewrite a stronger word.
+
+        Reproduces 電話一 coming out as 店化一: 化一 had been learned from some
+        other sentence, and because personal origin outranked every weight, it
+        took the 話 away from 電話 (50001) and left 電 to fall back to 店.
+        """
+        phrases = {
+            ("dian",): ["店", "電"],
+            ("hua",): ["話", "化"],
+            ("yi",): ["一"],
+            ("dian", "hua"): ["電話", "電化"],
+            ("hua", "yi"): ["畫一", "劃一"],
+        }
+        weights = {
+            "店": 12541,
+            "話": 58786,
+            "一": 135314,
+            "電話": 50001,
+            "電化": 647,
+            "畫一": 120,
+            "劃一": 96,
+        }
+        spans = decode_phrase_lattice(
+            ["dian", "hua", "yi"],
+            "店化一",
+            [False, False, False],
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            lambda readings: "化一" if readings == ["hua", "yi"] else "",
+        )
+        self.assertEqual("".join(span.text for span in spans), "電話一")
+
+    def test_personal_phrase_still_wins_when_it_is_the_better_span(self):
+        """The guard above must not make learned phrases useless.
+
+        Here the learned phrase covers readings the bundled lexicon has no
+        multi-character answer for, so it must still be chosen.
+        """
+        phrases = {
+            ("wang",): ["王", "往"],
+            ("xiao",): ["小", "笑"],
+            ("ming",): ["明", "名"],
+        }
+        weights = {"王": 9000, "往": 8000, "小": 20000, "笑": 7000, "明": 30000}
+        spans = decode_phrase_lattice(
+            ["wang", "xiao", "ming"],
+            "往笑名",
+            [False, False, False],
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            lambda readings: (
+                "王小明" if readings == ["wang", "xiao", "ming"] else ""
+            ),
+        )
+        self.assertEqual("".join(span.text for span in spans), "王小明")
+        self.assertTrue(spans[0].personal)
+
 
 if __name__ == "__main__":
     unittest.main()
