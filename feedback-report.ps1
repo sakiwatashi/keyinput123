@@ -221,7 +221,7 @@ $reportButton.Add_Click({
     }
     $body = $lines -join "`n"
     $title = "輸入法轉換錯誤回報（$($selected.Count) 筆）"
-    $url = "https://github.com/sakiwatashi/inputmethod/issues/new?title=$([Uri]::EscapeDataString($title))&body=$([Uri]::EscapeDataString($body))"
+    $url = "https://github.com/sakiwatashi/keyinput123/issues/new?title=$([Uri]::EscapeDataString($title))&body=$([Uri]::EscapeDataString($body))"
     Start-Process $url
 })
 $form.Controls.Add($reportButton)

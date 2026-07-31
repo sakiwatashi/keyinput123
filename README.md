@@ -1,6 +1,6 @@
 # 智慧優先注音
 
-[![Windows checks](https://github.com/sakiwatashi/inputmethod/actions/workflows/windows.yml/badge.svg)](https://github.com/sakiwatashi/inputmethod/actions/workflows/windows.yml)
+[![Windows checks](https://github.com/sakiwatashi/keyinput123/actions/workflows/windows.yml/badge.svg)](https://github.com/sakiwatashi/keyinput123/actions/workflows/windows.yml)
 
 以 PIME 與 libchewing 為基礎、操作方式接近微軟注音的 Windows 繁體中文輸入法。
 它保留逐字編輯的手感，同時使用常用詞庫與個人學習資料改善選字。
@@ -8,8 +8,8 @@
 ## Clone 與一鍵安裝
 
 ```powershell
-git clone https://github.com/sakiwatashi/inputmethod.git
-cd inputmethod
+git clone https://github.com/sakiwatashi/keyinput123.git
+cd keyinput123
 .\install.ps1
 ```
 
@@ -31,10 +31,11 @@ Git Bash 使用者可把最後一行改為 `./install.sh`。
 - 在段落中間按 Backspace 刪除後，下一個注音會補進原位置，不會跳到最右邊。
 - 短按 `Shift` 切換中英文；按住 `Shift` 再按字母則暫時輸入大寫英文且不切換模式。兩種操作都會正確處理尚未完成或尚未送出的注音，不會讓英文跳到中文字前方。
 - 啟用輸入法、切換輸入框或組字被強制終止時只重設內部的中英文切換，不會強制改寫應用程式的 TSF 開關；遊戲、密碼欄位或明確停用輸入法的控制項可保持關閉，避免反覆開關造成凍結。
-- 完整盤點標準鍵盤的 `Shift` 組合：數字列、`？`、`：`、`＋`、`——`、`，`、`。`、`『』`、`「」`、`～` 與 `｜` 都有明確輸出；`Shift+Tab`、`Shift+F1–F12`、`Ctrl+Shift` 與 `Alt+Shift` 仍交給應用程式或 Windows。
+- 完整盤點標準鍵盤的 `Shift` 組合：數字列與所有標點鍵在按住 `Shift` 時一律輸出該鍵的標準 ASCII 符號（`!`、`@`、`<`、`>`、`?`、`{`、`}` 等），不會落入注音對應而誤打出 `ㄝ`、`ㄡ`、`ㄥ`、`ㄤ`；`Shift+Tab`、`Shift+F1–F12` 與 `Alt+Shift` 仍交給應用程式或 Windows。
 - 單獨注音按空白時會先依字典補上一聲：字典第一候選是中文字就直接採用，例如 `ㄧ→一`、`ㄚ→啊／阿`，而 `ㄙ`、`ㄓ` 也會進入司／思、之／知等中文字候選；第一候選仍是原注音時則開啟候選單，不讓尾端生僻字冒充常用字。原始注音仍保留在第一頁前四項。完整的 `ㄢˊ` 等讀音同樣保留原注音候選。沒有正在組字時，直接按大千聲調鍵 `3`、`6`、`4`、`7` 會輸出 `ˇ`、`ˊ`、`ˋ`、`˙`；已有未提交文字時，原始注音與聲調會插入同一個可編輯組字區，不會產生 Enter 式提交。中文標點改走 `Ctrl`：`Ctrl+,`→`，`、`Ctrl+.`→`。`、`Ctrl+'`→`、`、`Ctrl+;`→`；`、`Ctrl+Shift+;`→`：`、`Ctrl+Shift+/`→`？`、`Ctrl+Shift+1`→`！`、`Ctrl+[`／`Ctrl+]`→`「`／`」`、`Ctrl+Shift+[`／`Ctrl+Shift+]`→`『`／`』`，這些在中文與英文模式下都可用。`Shift` 一律輸出標準 ASCII，例如 `Shift+,`→`<`、`Shift+Space`→空白。
 - 快速重疊按鍵有實體鍵碼備援，降低漏掉前一個注音符號的機率。
-- 候選依微軟注音習慣先排滿左欄 `1–5`，再排右欄 `6–0`。一般安裝保留 PIME 原廠簽章 DLL，以降低遊戲與反作弊程式的載入風險；未簽章的日式原生候選外觀只提供開發者明確選用。
+- 候選依微軟注音習慣先排滿左欄 `1–5`，再排右欄 `6–0`，並可用滑鼠直接點選。
+- 日式直向候選框由**獨立行程**繪製，而非塞在載入到每個應用程式的 TSF DLL 裡。因此所有程式（含遊戲）行程內始終只有 PIME 原廠簽章 DLL：未簽章模組被反作弊強制卸載而導致遊戲崩潰的問題不再發生。輔助行程偵測到前景為防作弊遊戲時會完全停止服務，交還原廠候選框。此功能預設關閉，需建立 `%APPDATA%\PinnedBopomofo\candidate-ui.json` 並設定 `{"enabled": true}` 後重啟 PIME 才啟用；詳見 `OUT_OF_PROCESS_UI_DESIGN.md`。
 
 ## 安裝與移除
 
