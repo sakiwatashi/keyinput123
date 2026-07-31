@@ -1581,6 +1581,36 @@ def main() -> None:
         assert restored_reply["candidateList"] != [" "]
         assert len(restored_reply["candidateList"]) > 1
 
+        # The mirror is cosmetic and runs on every key event, so a fault inside
+        # it must not take the keystroke down with it.
+        class ExplodingMirror:
+            @property
+            def beacon_ready(self):
+                raise RuntimeError("mirror is broken")
+
+            def show(self, *_args, **_kwargs):
+                raise RuntimeError("mirror is broken")
+
+            def hide(self):
+                raise RuntimeError("mirror is broken")
+
+            def warm_up(self):
+                raise RuntimeError("mirror is broken")
+
+        broken_service = PinnedBopomofoTextService(DummyClient())
+        broken_service.candidate_ui = ExplodingMirror()
+        broken_service.handleRequest(
+            {"method": "onActivate", "seqNum": 0, "isKeyboardOpen": False}
+        )
+        for index, key in enumerate("su3", start=1):
+            press(broken_service, key, 2300 + index)
+        assert broken_service.compositionString, (
+            "a broken candidate mirror must not stop composition"
+        )
+        broken_open = special_key(broken_service, 0x28, 2310)  # VK_DOWN
+        assert broken_open["success"], broken_open
+        assert len(broken_service.candidateList) > 1, broken_service.candidateList
+
         # Chinese punctuation lives on Ctrl, matching Microsoft Bopomofo, and
         # Shift is left to produce plain ASCII. Binding punctuation to Shift
         # made one physical key mean two things: Shift+, gave 「，」 while

@@ -173,7 +173,14 @@ class PinnedBopomofoTextService(TextService):
 
     def handleRequest(self, msg):
         reply = super().handleRequest(msg)
-        self._apply_beacon_mode(reply)
+        try:
+            self._apply_beacon_mode(reply)
+        except Exception:
+            # This runs on every key event and only shrinks a window. Like the
+            # rest of the mirror it is cosmetic, so a failure here must leave
+            # the reply exactly as the input method built it rather than take
+            # the keystroke down with it.
+            pass
         return reply
 
     def _apply_beacon_mode(self, reply) -> None:

@@ -49,6 +49,12 @@ PipeServer::~PipeServer() {
 }
 
 bool PipeServer::start(const std::wstring& pipeName, HWND target) {
+    // Assigning over a joinable std::thread calls std::terminate, which would
+    // kill the helper with no diagnostic at all. Today the caller alternates
+    // start and stop so this cannot happen, but that guarantee lives in
+    // another file; make the class safe on its own terms.
+    if (worker_.joinable())
+        stop();
     stopping_ = false;
     worker_ = std::thread(&PipeServer::run, this, pipeName, target);
     return true;

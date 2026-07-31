@@ -25,9 +25,17 @@
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tools/build_reading_phrase_lexicon.py`：合併固定版本 McBopomofo、libchewing-data 與 Rime Essay 權重，重建 `reading_phrases.json.gz`；生成檔不應手工修改。
+- `bopomofo_core/candidate_ui_client.py`：把候選清單鏡像給行程外候選視窗。射後
+  不理，絕不可阻塞 —— 出貨版 DLL 呼叫 `TransactNamedPipe` 沒有客戶端逾時，且
+  PIME 的 `server.py` 是單執行緒服務所有應用程式，一次阻塞會凍結全系統打字。
 - `tests/`：核心與 PIME 整合測試。
 - `installer/`：正式安裝與解除安裝流程。
 - `native_ui/`：候選框的完整 LGPL 原始碼、可重現建置腳本及 x86/x64 產物。
+- `native_ui/helper/`：**行程外**候選視窗（C++／Win32／GDI，不含 TSF 或 COM）。
+  日式直向候選框改由這個獨立行程繪製，讓所有應用程式（含遊戲）行程內只留 PIME
+  原廠簽章 DLL。設計與實測數據見 `OUT_OF_PROCESS_UI_DESIGN.md`。
+- `native_ui/diagnostics/`：定位策略探測、候選視窗監看、假信標與開關工具。
+- `KEY_BINDING_ALIGNMENT.md`：與微軟注音的按鍵對照、決策及刻意偏離之處。
 
 候選視窗的字型、每列數量、選擇標籤與方向鍵行為由 Python 模組控制；圓角、顏色、
 邊框、選取樣式，以及**兩個直欄（左 1–5、右 6–0、先直後橫）**都位於
@@ -74,15 +82,46 @@ Rime Essay 與台灣字頻本身只有文字／權重，沒有完整詞語讀音
 
 ```powershell
 python -m unittest discover -s tests -v
+.\tests\release_consistency_smoke.ps1
+.\tests\installer_payload_smoke.ps1
+.\tests\candidate_ui_policy_smoke.ps1
+.\tests\restore_signed_text_service_smoke.ps1
+.\tests\native_ui_preference_smoke.ps1
 .\build_pime_overlay.ps1
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_adapter_smoke.py
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_all_readings_audit.py
+.\native_ui\helper\build_helper.ps1
 .\native_ui\build_native_ui.ps1
 .\build_release.ps1
 ```
 
-修改正式版本時，也要同步更新 `pime_module/ime.json`、NSIS 安裝檔中的版本號及
-README。不要沿用舊安裝包的 SHA-256；每次建置都會產生新的雜湊。
+那五個 PowerShell 測試守的是**只在成品安裝程式才會顯現**的缺陷：單元測試全綠、
+從原始碼安裝也正常，但下載 EXE 的使用者第一步就失敗。它們都是實際出包之後補上
+的，不要因為「看起來與程式邏輯無關」而略過。
+
+### 版本號位置
+
+修改正式版本時，下列**六處**必須同時更新，`release_consistency_smoke.ps1` 會
+逐一核對：
+
+- `pime_module/ime.json`
+- `installer/SmartPriorityBopomofo.nsi`（`PRODUCT_VERSION` 與 `VIProductVersion`）
+- `build_release.ps1`（產物檔名）
+- `.github/workflows/windows.yml`（發布清單的檔名）
+- `README.md`（安裝說明）
+- `THIRD_PARTY_NOTICES.txt`（授權頁標題）
+
+最後一項曾被連續三個版本遺漏，因為當時的搜尋只涵蓋 `.ps1/.nsi/.json/.md/.yml`
+而沒有 `.txt`，使用者在授權頁看到的版本與實際安裝的不符。
+
+不要沿用舊安裝包的 SHA-256；每次建置都會產生新的雜湊。
+
+### 授權頁編碼
+
+NSIS 在 `Unicode True` 之下會以系統 ANSI 字碼頁讀取授權檔，除非該檔帶 UTF-8 BOM。
+`THIRD_PARTY_NOTICES.txt` 一度沒有 BOM，整個授權頁對使用者顯示為亂碼。任何含中文
+的授權檔都必須保留 BOM。同理，含中文的 PowerShell 腳本需要 BOM 才能被 Windows
+PowerShell 5.1 正確解析，C++ 原始碼需要 `/utf-8` 編譯選項。
 
 ## 個人資料與隱私
 

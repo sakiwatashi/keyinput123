@@ -1,5 +1,21 @@
 # Smart Priority Bopomofo native candidate UI
 
+There are two implementations of the Japanese-inspired candidate window here.
+**`helper/` is the one to use.**
+
+- **`helper/` — out-of-process (preferred).** A standalone executable that
+  draws the vertical-first grid in its own process and never loads into
+  another application. Every process, games included, keeps only PIME's
+  original signed `PIMETextService.dll`. See `../OUT_OF_PROCESS_UI_DESIGN.md`.
+- **`src/` — in-process (legacy, discouraged).** A rebuilt
+  `PIMETextService.dll`. Because a TSF text service is loaded into every
+  application that accepts text, this unsigned DLL also enters game processes.
+  VALORANT's Vanguard force-unloaded it mid-process and the game crashed with
+  a BEX64 fault; that incident is what the out-of-process design exists to
+  remove. It is kept for reference and for the explicit opt-in below.
+
+The rest of this file describes the legacy in-process build.
+
 This directory contains the source and reproducible build script for the
 Japanese-inspired candidate window bundled with Smart Priority Bopomofo.
 
