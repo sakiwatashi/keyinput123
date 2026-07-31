@@ -197,25 +197,35 @@ class BeaconReadinessTest(unittest.TestCase):
             launch=False,
             enabled=False,
         )
-        client._last_success = time.monotonic()
+        client._connected = True
         self.assertFalse(client.beacon_ready)
         client.close()
 
     def test_ready_after_a_recent_successful_write(self):
         client = absent_client()
-        client._last_success = time.monotonic()
+        client._connected = True
         self.assertTrue(client.beacon_ready)
         client.close()
 
-    def test_readiness_expires(self):
+    def test_readiness_survives_a_pause_between_compositions(self):
+        """A pause must not silently drop the window back to PIME's own.
+
+        The mirror writes asynchronously, so the check during a key event sees
+        the previous write's outcome. Expiring readiness on a timer meant that
+        after any pause longer than the window -- ordinary thinking time -- the
+        next candidate page fell back to PIME's full list, which the user sees
+        as the old row-major menu reappearing at random. The pipe handle stays
+        open between writes, so an established connection is the honest signal
+        and it does not go stale on its own.
+        """
         client = absent_client()
-        client._last_success = time.monotonic() - 3600.0
-        self.assertFalse(client.beacon_ready)
+        client._connected = True
+        self.assertTrue(client.beacon_ready)
         client.close()
 
     def test_write_failure_retracts_readiness_immediately(self):
         client = absent_client()
-        client._last_success = time.monotonic()
+        client._connected = True
         self.assertTrue(client.beacon_ready)
         # Draining a real send through the worker against a dead pipe must
         # clear liveness so the next keystroke restores the full list.
@@ -224,6 +234,31 @@ class BeaconReadinessTest(unittest.TestCase):
         while client.beacon_ready and time.monotonic() < deadline:
             time.sleep(0.02)
         self.assertFalse(client.beacon_ready)
+        client.close()
+
+
+class WarmUpTest(unittest.TestCase):
+    def test_warm_up_queues_a_connection_attempt(self):
+        client = absent_client()
+        client._ensure_worker()
+        while not client._queue.empty():
+            client._queue.get_nowait()
+        client._last_line = encode_hide()  # a stale identical state
+        client.warm_up()
+        # Deduplication must not swallow the warm-up, or the first candidate
+        # page of the session would still be drawn by PIME.
+        self.assertEqual(client._queue.get_nowait(), encode_hide())
+        client.close()
+
+    def test_warm_up_is_inert_when_disabled(self):
+        client = CandidateUiClient(
+            pipe_name=r"\\.\pipe\SmartPriorityBopomofoAbsent",
+            launch=False,
+            enabled=False,
+        )
+        client.warm_up()
+        self.assertTrue(client._queue.empty())
+        self.assertFalse(client._started)
         client.close()
 
 

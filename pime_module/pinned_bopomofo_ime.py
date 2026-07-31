@@ -25,30 +25,61 @@ from .bopomofo_core.session import CandidateSession
 from .bopomofo_core.state import INITIALS, MEDIALS, RIMES, TONES, Event, EventKind
 
 
-SHIFT_PUNCTUATION = {
-    0x20: "ˉ",  # Shift+Space: standalone first-tone mark
-    0x31: "！",
-    0x32: "＠",
-    0x33: "＃",
-    0x34: "＄",
-    0x35: "％",
-    0x36: "……",
-    0x37: "＆",
-    0x38: "＊",
-    0x39: "（",
-    0x30: "）",
-    0xBA: "：",  # Shift+;
-    0xBB: "＋",  # Shift+=
-    0xBC: "，",  # Shift+,
-    0xBD: "——",  # Shift+-
-    0xBE: "。",  # Shift+.
-    0xBF: "？",  # Shift+/
-    0xC0: "～",  # Shift+`
-    0xDB: "『",  # Shift+[
-    0xDC: "｜",  # Shift+\
-    0xDD: "』",  # Shift+]
-}
 VK_OEM_QUOTE = 0xDE
+VK_OEM_SEMICOLON = 0xBA
+VK_OEM_COMMA = 0xBC
+VK_OEM_PERIOD = 0xBE
+VK_OEM_SLASH = 0xBF
+VK_OEM_LBRACKET = 0xDB
+VK_OEM_RBRACKET = 0xDD
+
+# Microsoft Bopomofo puts Chinese punctuation on Ctrl and leaves Shift for
+# plain ASCII. Binding punctuation to Shift instead made one physical key mean
+# two different things depending on mode: Shift+, produced 「，」 while composing
+# but 「<」 once the same Shift had toggled English, which is the inconsistency
+# this table exists to remove.
+#
+# These apply in Chinese and English mode alike -- being usable without
+# switching modes is the point of the Ctrl convention.
+#
+# Deliberate departure from Microsoft: 「」 sits on Ctrl+[ ] where Microsoft
+# puts 【】. 「」 is the primary quotation mark in Traditional Chinese and 【】
+# is comparatively rare, so the common case gets the shorter chord and the
+# nested quotes 『』 take Ctrl+Shift.
+# What a shifted non-letter key stands for when the host supplies no charCode.
+# charCode is preferred because it follows the active keyboard layout, but
+# without a fallback the key would drop through to the Bopomofo table and a
+# shifted punctuation key would insert a Bopomofo symbol instead of a symbol.
+SHIFTED_ASCII_FALLBACK = {
+    0x20: " ",
+    0x31: "!", 0x32: "@", 0x33: "#", 0x34: "$", 0x35: "%",
+    0x36: "^", 0x37: "&", 0x38: "*", 0x39: "(", 0x30: ")",
+    VK_OEM_SEMICOLON: ":",
+    0xBB: "+",
+    VK_OEM_COMMA: "<",
+    0xBD: "_",
+    VK_OEM_PERIOD: ">",
+    VK_OEM_SLASH: "?",
+    0xC0: "~",
+    VK_OEM_LBRACKET: "{",
+    0xDC: "|",
+    VK_OEM_RBRACKET: "}",
+    VK_OEM_QUOTE: '"',
+}
+
+CTRL_PUNCTUATION = {
+    (VK_OEM_COMMA, False): "，",
+    (VK_OEM_PERIOD, False): "。",
+    (VK_OEM_QUOTE, False): "、",
+    (VK_OEM_SEMICOLON, False): "；",
+    (VK_OEM_SEMICOLON, True): "：",
+    (VK_OEM_SLASH, True): "？",
+    (0x31, True): "！",
+    (VK_OEM_LBRACKET, False): "「",
+    (VK_OEM_RBRACKET, False): "」",
+    (VK_OEM_LBRACKET, True): "『",
+    (VK_OEM_RBRACKET, True): "』",
+}
 CANDIDATE_PAGE_SIZE = 10
 MAX_PHRASE_CHOICES = 12
 CANDIDATES_PER_ROW = 2
@@ -102,7 +133,6 @@ class PinnedBopomofoTextService(TextService):
         self.feedback_store = FeedbackStore(feedback_path)
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
-        self.quote_open = False
         self.english_mode = False
         self.last_key_event = None
         self.last_key_down_time = 0.0
@@ -203,6 +233,13 @@ class PinnedBopomofoTextService(TextService):
         # the right. Keeping the native list and label string the same length
         # prevents PIME from
         # reading past the labels and painting garbage characters.
+        # Connect before the user can compose anything. Beacon mode needs a
+        # live connection, so without this the first candidate page of every
+        # session is drawn by PIME's own window instead.
+        try:
+            self.candidate_ui.warm_up()
+        except Exception:
+            pass
         self.setSelKeys(CANDIDATE_SELECTION_LABELS)
         self.customizeUI(
             candFontName="Microsoft JhengHei UI",
@@ -243,6 +280,10 @@ class PinnedBopomofoTextService(TextService):
             self.last_key_down_time = time.time()
         if keyEvent.isKeyDown(VK_MENU):
             return False
+        # Ahead of the English-mode passthrough on purpose: Ctrl punctuation is
+        # meant to work in both modes.
+        if self._ctrl_punctuation(keyEvent) is not None:
+            return True
         if keyEvent.isKeyDown(VK_CONTROL):
             return self.showCandidates and keyEvent.keyCode == VK_PRIOR
         if self.english_mode:
@@ -251,9 +292,9 @@ class PinnedBopomofoTextService(TextService):
             return True
         if self.showCandidates and self._candidate_number(keyEvent) is not None:
             return True
-        if self._shift_punctuation(keyEvent) is not None:
-            return True
         if self._temporary_english_letter(keyEvent) is not None:
+            return True
+        if self._shift_ascii(keyEvent) is not None:
             return True
         if keyEvent.keyCode == VK_SPACE:
             return self.isComposing()
@@ -273,6 +314,12 @@ class PinnedBopomofoTextService(TextService):
         return symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None
 
     def onKeyDown(self, keyEvent):
+        # Mirrors filterKeyDown: ahead of the English-mode passthrough so the
+        # Ctrl punctuation shortcuts work in both modes.
+        ctrl_punctuation = self._ctrl_punctuation(keyEvent)
+        if ctrl_punctuation is not None:
+            self._emit_punctuation(ctrl_punctuation)
+            return True
         if self.english_mode:
             return False
         numpad_text = self._numpad_text(keyEvent)
@@ -292,16 +339,14 @@ class PinnedBopomofoTextService(TextService):
             self._choose_highlighted_candidate(candidate_number)
             return True
 
-        punctuation = self._shift_punctuation(keyEvent)
-        if punctuation is not None:
-            self._emit_punctuation(punctuation)
-            if keyEvent.keyCode == VK_OEM_QUOTE:
-                self.quote_open = not self.quote_open
-            return True
-
         english_letter = self._temporary_english_letter(keyEvent)
         if english_letter is not None:
             self._emit_temporary_english(english_letter)
+            return True
+
+        shifted_ascii = self._shift_ascii(keyEvent)
+        if shifted_ascii is not None:
+            self._emit_punctuation(shifted_ascii)
             return True
 
         if keyEvent.keyCode == VK_DOWN and not self.showCandidates:
@@ -518,16 +563,44 @@ class PinnedBopomofoTextService(TextService):
         # even when PIME supplies no charCode or the Bopomofo keymap sees it.
         return NUMPAD_TEXT.get(keyEvent.keyCode)
 
-    def _shift_punctuation(self, keyEvent) -> str | None:
-        if not (
-            keyEvent.isKeyDown(VK_SHIFT)
-            or keyEvent.isKeyDown(0xA0)  # VK_LSHIFT
-            or keyEvent.isKeyDown(0xA1)  # VK_RSHIFT
-        ):
+    @staticmethod
+    def _shift_held(keyEvent) -> bool:
+        return any(
+            keyEvent.isKeyDown(code) for code in (VK_SHIFT, 0xA0, 0xA1)
+        )
+
+    def _ctrl_punctuation(self, keyEvent) -> str | None:
+        """Chinese punctuation, following Microsoft Bopomofo's Ctrl convention.
+
+        Callers must consult this before any English-mode passthrough: these
+        shortcuts are meant to work without switching modes.
+        """
+        if not keyEvent.isKeyDown(VK_CONTROL):
             return None
-        if keyEvent.keyCode == VK_OEM_QUOTE:
-            return "」" if self.quote_open else "「"
-        return SHIFT_PUNCTUATION.get(keyEvent.keyCode)
+        return CTRL_PUNCTUATION.get(
+            (keyEvent.keyCode, self._shift_held(keyEvent))
+        )
+
+    def _shift_ascii(self, keyEvent) -> str | None:
+        """The plain ASCII character a shifted non-letter key stands for.
+
+        Emitted here rather than passed through to the application, because a
+        pending composition has to commit first; letting the raw character
+        reach the application while an uncommitted buffer is still displayed
+        would insert it in the wrong place.
+
+        Letters are excluded: Shift+A-Z is the separate temporary-English
+        interaction, which emits one uppercase letter without changing mode.
+        """
+        if not self._shift_held(keyEvent):
+            return None
+        if 0x41 <= keyEvent.keyCode <= 0x5A:
+            return None
+        # charCode already reflects the active keyboard layout, so it is
+        # preferred; the table only covers hosts that supply none.
+        if 0x20 <= keyEvent.charCode <= 0x7E:
+            return chr(keyEvent.charCode)
+        return SHIFTED_ASCII_FALLBACK.get(keyEvent.keyCode)
 
     def _temporary_english_letter(self, keyEvent) -> str | None:
         """Return the uppercase ASCII letter produced by Shift+A-Z.

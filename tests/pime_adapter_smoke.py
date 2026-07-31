@@ -72,6 +72,37 @@ def special_key(service, key_code: int, sequence: int) -> dict:
     return reply
 
 
+def modified_key(
+    service,
+    key_code: int,
+    sequence: int,
+    ctrl: bool = False,
+    shift: bool = False,
+    char_code: int = 0,
+) -> dict:
+    """Send one key with Ctrl and/or Shift physically held."""
+    key_states = [0] * 256
+    key_states[key_code] = 0x80
+    if ctrl:
+        key_states[0x11] = 0x80  # VK_CONTROL
+    if shift:
+        key_states[0x10] = 0x80  # VK_SHIFT
+    reply = service.handleRequest(
+        {
+            "method": "onKeyDown",
+            "seqNum": sequence,
+            "charCode": char_code,
+            "keyCode": key_code,
+            "repeatCount": 1,
+            "scanCode": 0,
+            "isExtended": False,
+            "keyStates": key_states,
+        }
+    )
+    assert reply["success"]
+    return reply
+
+
 def candidate_selection_key(service, index: int, sequence: int) -> dict:
     if not 0 <= index <= 9:
         raise AssertionError(f"candidate index outside current page: {index}")
@@ -826,42 +857,49 @@ def main() -> None:
         sequence = type_readings(personal_service, custom_readings, sequence)
         assert personal_service.compositionString == "術業"
 
-        # Shift+/ (the ㄥ key) emits a full-width question mark and commits an
-        # existing composition with the punctuation attached.
+        # Ctrl+Shift+/ emits a full-width question mark and commits an existing
+        # composition with the punctuation attached. Punctuation moved from
+        # Shift to Ctrl to match Microsoft Bopomofo; the commit semantics are
+        # unchanged.
         punctuation_service = PinnedBopomofoTextService(DummyClient())
         sequence = type_readings(
             punctuation_service, ["ㄗˋ", "ㄉㄧㄢˇ"], sequence
         )
-        punctuation_reply = shifted_key(punctuation_service, 0xBF, sequence)
+        punctuation_reply = modified_key(
+            punctuation_service, 0xBF, sequence, ctrl=True, shift=True
+        )
         sequence += 1
         assert punctuation_reply["commitString"] == "字典？"
         assert punctuation_service.compositionString == ""
 
-        # Every printable Shift symbol on the standard keyboard is accounted
-        # for. This protects the two easy-to-miss OEM keys as well as the
-        # existing Chinese punctuation mappings.
+        # Every printable shifted non-letter key now yields its plain ASCII
+        # symbol. The important property is that none of them falls through to
+        # the Bopomofo table: these keys carry Bopomofo when unshifted, so a
+        # gap here would insert ㄝ, ㄡ, ㄥ or ㄤ instead of a symbol. This
+        # harness sends no charCode, which also exercises the layout fallback.
         expected_shift_symbols = {
-            0x20: "ˉ",
-            0x31: "！",
-            0x32: "＠",
-            0x33: "＃",
-            0x34: "＄",
-            0x35: "％",
-            0x36: "……",
-            0x37: "＆",
-            0x38: "＊",
-            0x39: "（",
-            0x30: "）",
-            0xBA: "：",
-            0xBB: "＋",
-            0xBC: "，",
-            0xBD: "——",
-            0xBE: "。",
-            0xBF: "？",
-            0xC0: "～",
-            0xDB: "『",
-            0xDC: "｜",
-            0xDD: "』",
+            0x20: " ",
+            0x31: "!",
+            0x32: "@",
+            0x33: "#",
+            0x34: "$",
+            0x35: "%",
+            0x36: "^",
+            0x37: "&",
+            0x38: "*",
+            0x39: "(",
+            0x30: ")",
+            0xBA: ":",
+            0xBB: "+",
+            0xBC: "<",
+            0xBD: "_",
+            0xBE: ">",
+            0xBF: "?",
+            0xC0: "~",
+            0xDB: "{",
+            0xDC: "|",
+            0xDD: "}",
+            0xDE: '"',
         }
         for key_code, expected in expected_shift_symbols.items():
             symbol_service = PinnedBopomofoTextService(DummyClient())
@@ -873,12 +911,19 @@ def main() -> None:
             )
             assert not symbol_service.english_mode
 
-        # Shift+quote alternates Taiwanese corner quotes.
-        open_quote = shifted_key(punctuation_service, 0xDE, sequence)
+        # Corner quotes moved to Ctrl+[ and Ctrl+], replacing the old Shift+'
+        # toggle. The toggle depended on a hidden open/closed flag that drifted
+        # out of step with the text whenever a quote was inserted or deleted
+        # elsewhere; independent keys are always predictable.
+        open_quote = modified_key(punctuation_service, 0xDB, sequence, ctrl=True)
         sequence += 1
-        close_quote = shifted_key(punctuation_service, 0xDE, sequence)
+        close_quote = modified_key(punctuation_service, 0xDD, sequence, ctrl=True)
+        sequence += 1
         assert open_quote["commitString"] == "「"
         assert close_quote["commitString"] == "」"
+        repeat_open = modified_key(punctuation_service, 0xDB, sequence, ctrl=True)
+        sequence += 1
+        assert repeat_open["commitString"] == "「", "the key must not alternate"
 
         # A short standalone Shift press toggles Chinese/English.  Printable
         # keys pass through untouched in English mode, and Shift toggles back.
@@ -1045,13 +1090,24 @@ def main() -> None:
         assert partial_temporary_service.session.preedit == ""
         assert not partial_temporary_service.english_mode
 
-        # Shift punctuation follows the same replacement rule as Shift+A-Z.
+        # Shifted symbols follow the same replacement rule as Shift+A-Z: they
+        # replace an unfinished sound rather than sitting beside it.
         partial_symbol_service = PinnedBopomofoTextService(DummyClient())
         press(partial_symbol_service, "a", sequence)  # incomplete ㄇ
         symbol_reply = shifted_key(partial_symbol_service, 0xBF, sequence + 1)
         sequence += 2
-        assert symbol_reply["commitString"] == "？"
+        assert symbol_reply["commitString"] == "?"
         assert partial_symbol_service.session.preedit == ""
+
+        # Ctrl punctuation obeys the same rule.
+        partial_ctrl_service = PinnedBopomofoTextService(DummyClient())
+        press(partial_ctrl_service, "a", sequence)  # incomplete ㄇ
+        ctrl_reply = modified_key(
+            partial_ctrl_service, 0xBF, sequence + 1, ctrl=True, shift=True
+        )
+        sequence += 2
+        assert ctrl_reply["commitString"] == "？"
+        assert partial_ctrl_service.session.preedit == ""
 
         # Numpad is always numeric text in Chinese mode. It cannot produce a
         # Bopomofo symbol or select candidate 1, and replaces a partial sound.
@@ -1501,14 +1557,14 @@ def main() -> None:
         beacon_service.candidate_ui._enabled = True
 
         # Helper not proven alive: PIME must still receive the whole page.
-        beacon_service.candidate_ui._last_success = 0.0
+        beacon_service.candidate_ui._connected = False
         open_reply = special_key(beacon_service, 0x28, 20)  # VK_DOWN
         assert open_reply["showCandidates"] is True
         full_page = list(open_reply["candidateList"])
         assert len(full_page) > 1, full_page
 
         # Helper alive: the wire value collapses to a single blank marker.
-        beacon_service.candidate_ui._last_success = time.monotonic()
+        beacon_service.candidate_ui._connected = True
         beacon_reply = special_key(beacon_service, 0x28, 21)  # VK_DOWN
         assert beacon_reply["candidateList"] == [" "], beacon_reply["candidateList"]
         assert beacon_reply["candidateCursor"] == 0
@@ -1517,10 +1573,78 @@ def main() -> None:
         assert " " not in beacon_service.candidateList
 
         # Losing the helper restores the full page on the very next key.
-        beacon_service.candidate_ui._last_success = 0.0
+        beacon_service.candidate_ui._connected = False
         restored_reply = special_key(beacon_service, 0x28, 22)  # VK_DOWN
         assert restored_reply["candidateList"] != [" "]
         assert len(restored_reply["candidateList"]) > 1
+
+        # Chinese punctuation lives on Ctrl, matching Microsoft Bopomofo, and
+        # Shift is left to produce plain ASCII. Binding punctuation to Shift
+        # made one physical key mean two things: Shift+, gave 「，」 while
+        # composing but 「<」 after the same Shift had toggled English.
+        VK_CONTROL_DOWN = True
+        punctuation_service = PinnedBopomofoTextService(DummyClient())
+        punctuation_service.handleRequest(
+            {"method": "onActivate", "seqNum": 0, "isKeyboardOpen": False}
+        )
+        ctrl_cases = [
+            (0xBC, False, "，"),   # Ctrl+,
+            (0xBE, False, "。"),   # Ctrl+.
+            (0xDE, False, "、"),   # Ctrl+'
+            (0xBA, False, "；"),   # Ctrl+;
+            (0xBA, True, "："),    # Ctrl+Shift+;
+            (0xBF, True, "？"),    # Ctrl+Shift+/
+            (0x31, True, "！"),    # Ctrl+Shift+1
+            (0xDB, False, "「"),   # Ctrl+[
+            (0xDD, False, "」"),   # Ctrl+]
+            (0xDB, True, "『"),    # Ctrl+Shift+[
+            (0xDD, True, "』"),    # Ctrl+Shift+]
+        ]
+        for offset, (key_code, shift, expected) in enumerate(ctrl_cases):
+            reply = modified_key(
+                punctuation_service, key_code, 2000 + offset,
+                ctrl=VK_CONTROL_DOWN, shift=shift,
+            )
+            assert reply["return"] is True, (key_code, shift, reply)
+            assert reply.get("commitString") == expected, (
+                key_code, shift, reply.get("commitString"), expected,
+            )
+
+        # The same shortcuts must work while the profile is in English mode;
+        # not having to switch modes is the whole point of the convention.
+        punctuation_service.english_mode = True
+        english_reply = modified_key(punctuation_service, 0xBC, 2100, ctrl=True)
+        assert english_reply["return"] is True, english_reply
+        assert english_reply.get("commitString") == "，", english_reply
+        punctuation_service.english_mode = False
+
+        # Shift now yields the plain ASCII symbol rather than a full-width one.
+        # charCode carries what the layout produces, so this stays correct on
+        # non-US layouts.
+        shift_reply = modified_key(
+            punctuation_service, 0xBC, 2200, shift=True, char_code=ord("<")
+        )
+        assert shift_reply["return"] is True, shift_reply
+        assert shift_reply.get("commitString") == "<", shift_reply
+
+        # Shift+Space no longer emits the first-tone mark; it is an ordinary
+        # space like every other shifted non-letter key.
+        space_reply = modified_key(
+            punctuation_service, 0x20, 2201, shift=True, char_code=ord(" ")
+        )
+        assert space_reply.get("commitString") == " ", space_reply
+
+        # Shift+A-Z is a separate protected interaction and must be untouched.
+        letter_reply = modified_key(punctuation_service, 0x41, 2202, shift=True)
+        assert letter_reply["return"] is True, letter_reply
+        assert letter_reply.get("commitString") == "A", letter_reply
+
+        # A bare punctuation key still spells Bopomofo: the comma key is ㄝ.
+        bare_reply = modified_key(
+            punctuation_service, 0xBC, 2203, char_code=ord(",")
+        )
+        assert bare_reply["return"] is True, bare_reply
+        assert "ㄝ" in bare_reply.get("compositionString", ""), bare_reply
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

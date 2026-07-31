@@ -31,7 +31,21 @@ When PIME is installed, also run:
 - Tapping Shift toggles persistent Chinese/English mode.
 - Holding Shift and pressing A-Z emits one temporary uppercase English letter
   without changing modes. Pending Chinese must be committed before the letter.
-- Shift punctuation, ten-item two-column candidate pages, Right/Down pagination,
+- Chinese punctuation lives on **Ctrl**, following Microsoft Bopomofo, and
+  **Shift is reserved for plain ASCII**. Binding punctuation to Shift made one
+  physical key mean two things depending on mode, which is why it was changed;
+  do not move it back. `Ctrl+,` `Ctrl+.` `Ctrl+'` `Ctrl+;` and their
+  `Ctrl+Shift` variants must keep working in **both** Chinese and English mode,
+  so the check has to precede the English-mode passthrough in both
+  `filterKeyDown` and `onKeyDown`. `「」` sits on `Ctrl+[` / `Ctrl+]` and `『』`
+  on `Ctrl+Shift+[` / `Ctrl+Shift+]`; this deliberately differs from Microsoft,
+  which puts the rarer `【】` there.
+- A shifted non-letter key must never reach the Bopomofo table. These keys
+  carry Bopomofo unshifted (`,`=ㄝ `.`=ㄡ `/`=ㄥ `;`=ㄤ), so a gap inserts a
+  Bopomofo symbol where a symbol belongs. Prefer the host's `charCode` so the
+  active keyboard layout wins, and keep the fallback table for hosts that send
+  none.
+- Ten-item two-column candidate pages, Right/Down pagination,
   and right-side character editing are core behaviors. The left column must
   contain 1-5 from top to bottom and the right column 6-0; never bind A-J as
   candidate labels. Do not replace or
@@ -98,8 +112,10 @@ When PIME is installed, also run:
   secure/custom controls from entering an open/close feedback loop.
 - Numpad 0-9, decimal, divide, multiply, subtract, and add always emit their
   literal ASCII characters and never Bopomofo or candidate numbers.
-  Shift+A-Z and Shift punctuation replace only an unfinished active syllable,
-  preserve completed Chinese, and emit at the active caret.
+  Shift+A-Z, shifted ASCII symbols, and Ctrl punctuation replace only an
+  unfinished active syllable, preserve completed Chinese, and emit at the
+  active caret. They are emitted by the service rather than passed through to
+  the application, because a pending composition has to commit first.
 - Literal Bopomofo is a core behavior. For any lone initial, medial, or rime,
   Space first asks the dictionary for the corresponding first-tone Chinese
   syllable; do not classify every initial as invalid because ㄙ and ㄓ,
@@ -110,7 +126,9 @@ When PIME is installed, also run:
   Completed readings also offer their literal spelling within the
   first four candidates, including sentence editing. With no active syllable,
   bare DaQian tone keys emit their
-  tone marks (3=ˇ, 6=ˊ, 4=ˋ, 7=˙), while Shift+Space emits ˉ. Numpad digits
+  tone marks (3=ˇ, 6=ˊ, 4=ˋ, 7=˙). Shift+Space no longer emits ˉ: Shift is
+  reserved for plain ASCII, so it emits a space like any shifted non-letter
+  key. The first-tone mark has no standalone binding. Numpad digits
   and operators remain literal text. When completed segments already exist,
   raw Zhuyin and bare tone marks stay as protected segments in the editable
   composition; they must not commit the surrounding text like Enter.

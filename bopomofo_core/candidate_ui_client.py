@@ -42,11 +42,6 @@ _FIELD_SEPARATOR = "\x1f"
 # deliberately absent, so attempts are spaced out.
 _RELAUNCH_INTERVAL_SECONDS = 5.0
 
-# How long a successful write is taken as evidence that the helper is still
-# there. Every keystroke refreshes it, so this only has to outlast a pause in
-# the middle of one composition.
-_LIVENESS_SECONDS = 5.0
-
 _CREATE_NO_WINDOW = 0x08000000
 
 
@@ -124,24 +119,38 @@ class CandidateUiClient:
         self._launch = launch
         self._last_launch = 0.0
         # Written by the worker, read by the input-method thread. A plain bool
-        # and float need no lock, and the reader must never block on one.
-        self._last_success = 0.0
+        # needs no lock, and the reader must never block on one.
+        self._connected = False
 
     @property
     def beacon_ready(self) -> bool:
-        """True only when a write recently reached a live helper.
+        """True while the pipe to a live helper is established.
 
         Beacon mode shrinks PIME's own candidate window to a position marker,
         so the real list exists nowhere else. Claiming readiness while the
         helper is gone would leave the user with an empty box and no way to
-        pick a candidate, so this deliberately requires proof of a recent
-        successful write rather than merely being enabled.
+        pick a candidate, so this requires an actual connection.
+
+        This is deliberately not a time window. The mirror writes on a worker
+        thread, so a check during a key event sees the previous write's
+        outcome; expiring on a timer meant that after ordinary thinking time
+        the next candidate page silently fell back to PIME's own full list,
+        which the user sees as the old row-major menu reappearing at random.
+        The pipe handle stays open between writes, so the connection itself is
+        the honest signal and a broken helper surfaces on the next write.
+        """
+        return self._enabled and self._connected
+
+    def warm_up(self) -> None:
+        """Establishes the connection before the first candidate page.
+
+        Without this the first page of a session is always drawn by PIME,
+        because nothing has been written yet and beacon mode cannot engage.
         """
         if not self._enabled:
-            return False
-        if self._last_success <= 0.0:
-            return False
-        return (time.monotonic() - self._last_success) < _LIVENESS_SECONDS
+            return
+        self._last_line = None
+        self._offer(encode_hide())
 
     def _ensure_worker(self) -> None:
         if self._started:
@@ -228,11 +237,11 @@ class CandidateUiClient:
                 if handle is None:
                     handle = open(self._pipe_name, "wb", buffering=0)
                 handle.write(line.encode("utf-8"))
-                self._last_success = time.monotonic()
+                self._connected = True
             except Exception:
                 # Liveness is retracted immediately, so the very next keystroke
                 # goes back to letting PIME draw the full candidate list.
-                self._last_success = 0.0
+                self._connected = False
                 # The helper may not be running at all; that is a supported
                 # state. Drop this update, forget the connection, and let the
                 # next one retry.
