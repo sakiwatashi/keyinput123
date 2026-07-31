@@ -31,6 +31,9 @@ jobs:
       - name: Test candidate UI foreground policy
         shell: powershell
         run: .\tests\candidate_ui_policy_smoke.ps1
+      - name: Test installer packages every script it loads
+        shell: powershell
+        run: .\tests\installer_payload_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1
@@ -52,5 +55,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/Smart-Priority-Bopomofo-Setup-0.6.1.exe
+            release/Smart-Priority-Bopomofo-Setup-0.6.2.exe
             release/SHA256SUMS.txt

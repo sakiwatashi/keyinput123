@@ -3,7 +3,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 !define PRODUCT_NAME "智慧優先注音"
-!define PRODUCT_VERSION "0.6.1"
+!define PRODUCT_VERSION "0.6.2"
 !define PRODUCT_PUBLISHER "Smart Priority Bopomofo contributors"
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
 
@@ -14,7 +14,7 @@ InstallDirRegKey HKLM "${PRODUCT_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.6.1.0"
+VIProductVersion "0.6.2.0"
 VIAddVersionKey /LANG=1028 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1028 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1028 "FileDescription" "${PRODUCT_NAME} 安裝程式"
@@ -43,8 +43,12 @@ VIAddVersionKey /LANG=1028 "LegalCopyright" "Copyright (c) 2026 Smart Priority B
 Section "安裝智慧優先注音" SEC_MAIN
     SetShellVarContext current
     SetOutPath "$INSTDIR"
+    ; install.ps1 and uninstall.ps1 dot-source the two helpers below. A helper
+    ; that is missing from this list aborts the script before it reaches
+    ; Start-Transcript, so the failure never appears in install.log.
     File "install.ps1"
     File "native_ui_preference.ps1"
+    File "restore_signed_text_service.ps1"
     File "uninstall.ps1"
     File "..\release-staging\THIRD_PARTY_NOTICES.txt"
     File "..\release-staging\PIME-LICENSE.txt"
