@@ -590,7 +590,7 @@ class PinnedBopomofoTextService(TextService):
         would insert it in the wrong place.
 
         Letters are excluded: Shift+A-Z is the separate temporary-English
-        interaction, which emits one uppercase letter without changing mode.
+        interaction, which emits one English letter without changing mode.
         """
         if not self._shift_held(keyEvent):
             return None
@@ -603,19 +603,27 @@ class PinnedBopomofoTextService(TextService):
         return SHIFTED_ASCII_FALLBACK.get(keyEvent.keyCode)
 
     def _temporary_english_letter(self, keyEvent) -> str | None:
-        """Return the uppercase ASCII letter produced by Shift+A-Z.
+        """Return the ASCII letter produced by Shift+A-Z.
 
         A standalone Shift press still toggles Chinese/English mode.  Holding
         Shift while pressing a letter is a separate, protected interaction:
         it emits one temporary English letter without changing modes.
+
+        The case follows the keyboard rather than being forced to uppercase.
+        Shift inverts Caps Lock everywhere else in Windows, so with Caps Lock
+        on, Shift+A must produce a lowercase letter; always returning
+        uppercase made this the one place where that stopped being true.
         """
-        if not any(
-            keyEvent.isKeyDown(code) for code in (VK_SHIFT, 0xA0, 0xA1)
-        ):
+        if not self._shift_held(keyEvent):
             return None
-        if 0x41 <= keyEvent.keyCode <= 0x5A:
-            return chr(keyEvent.keyCode)
-        return None
+        if not (0x41 <= keyEvent.keyCode <= 0x5A):
+            return None
+        # charCode is what Windows already resolved from the full keyboard
+        # state, so it honours Caps Lock and non-US layouts for free.
+        if 0x41 <= keyEvent.charCode <= 0x5A or 0x61 <= keyEvent.charCode <= 0x7A:
+            return chr(keyEvent.charCode)
+        letter = chr(keyEvent.keyCode)
+        return letter.lower() if keyEvent.isKeyToggled(VK_CAPITAL) else letter
 
     def _emit_temporary_english(self, letter: str) -> None:
         """Replace an unfinished reading with one temporary ASCII letter."""
@@ -865,6 +873,7 @@ class PinnedBopomofoTextService(TextService):
         trusted_current = current_text in trusted
         trusted_front = trusted if trusted_current else []
         trusted_tail = [] if trusted_current else trusted
+
         return [
             phrase
             for phrase in dict.fromkeys(

@@ -79,6 +79,7 @@ def modified_key(
     ctrl: bool = False,
     shift: bool = False,
     char_code: int = 0,
+    caps: bool = False,
 ) -> dict:
     """Send one key with Ctrl and/or Shift physically held."""
     key_states = [0] * 256
@@ -87,6 +88,8 @@ def modified_key(
         key_states[0x11] = 0x80  # VK_CONTROL
     if shift:
         key_states[0x10] = 0x80  # VK_SHIFT
+    if caps:
+        key_states[0x14] = 0x01  # VK_CAPITAL, toggled rather than held
     reply = service.handleRequest(
         {
             "method": "onKeyDown",
@@ -1639,9 +1642,23 @@ def main() -> None:
         assert letter_reply["return"] is True, letter_reply
         assert letter_reply.get("commitString") == "A", letter_reply
 
+        # Shift inverts Caps Lock everywhere else in Windows, so Shift+A with
+        # Caps Lock on must produce a lowercase letter. Forcing uppercase from
+        # the virtual key made this the one place that disagreed.
+        caps_reply = modified_key(
+            punctuation_service, 0x41, 2203, shift=True, caps=True
+        )
+        assert caps_reply.get("commitString") == "a", caps_reply
+        # charCode is what Windows already resolved, so it wins when present
+        # and keeps non-US layouts correct.
+        layout_reply = modified_key(
+            punctuation_service, 0x41, 2204, shift=True, char_code=ord("a")
+        )
+        assert layout_reply.get("commitString") == "a", layout_reply
+
         # A bare punctuation key still spells Bopomofo: the comma key is ㄝ.
         bare_reply = modified_key(
-            punctuation_service, 0xBC, 2203, char_code=ord(",")
+            punctuation_service, 0xBC, 2205, char_code=ord(",")
         )
         assert bare_reply["return"] is True, bare_reply
         assert "ㄝ" in bare_reply.get("compositionString", ""), bare_reply
