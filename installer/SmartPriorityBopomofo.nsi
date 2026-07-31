@@ -3,7 +3,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 !define PRODUCT_NAME "智慧優先注音"
-!define PRODUCT_VERSION "0.6.5"
+!define PRODUCT_VERSION "0.6.6"
 !define PRODUCT_PUBLISHER "Smart Priority Bopomofo contributors"
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
 
@@ -14,7 +14,7 @@ InstallDirRegKey HKLM "${PRODUCT_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.6.5.0"
+VIProductVersion "0.6.6.0"
 VIAddVersionKey /LANG=1028 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1028 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1028 "FileDescription" "${PRODUCT_NAME} 安裝程式"
