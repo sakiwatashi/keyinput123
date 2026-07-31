@@ -91,6 +91,7 @@ Rime Essay 與台灣字頻本身只有文字／權重，沒有完整詞語讀音
 python -m unittest discover -s tests -v
 .\tests\release_consistency_smoke.ps1
 .\tests\installer_payload_smoke.ps1
+.\tests\installer_resilience_smoke.ps1
 .\tests\candidate_ui_policy_smoke.ps1
 .\tests\restore_signed_text_service_smoke.ps1
 .\tests\native_ui_preference_smoke.ps1

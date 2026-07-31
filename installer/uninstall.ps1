@@ -128,6 +128,15 @@ try {
     }
     Write-Output "Smart Priority Bopomofo was removed; PIME and user learning data were preserved."
 }
+catch {
+    # Same reasoning as install.ps1: without this, an uncaught error surfaces
+    # only after the transcript below has stopped, and the log the failure
+    # dialog points at stays empty.
+    Write-Output "解除安裝失敗: $($_.Exception.Message)"
+    Write-Output $_.InvocationInfo.PositionMessage
+    Write-Output $_.ScriptStackTrace
+    throw
+}
 finally {
     Stop-Transcript | Out-Null
 }

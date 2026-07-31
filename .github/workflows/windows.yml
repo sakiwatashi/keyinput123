@@ -34,6 +34,9 @@ jobs:
       - name: Test installer packages every script it loads
         shell: powershell
         run: .\tests\installer_payload_smoke.ps1
+      - name: Test installer survives stale PIME state and logs failures
+        shell: powershell
+        run: .\tests\installer_resilience_smoke.ps1
       - name: Test licence encoding and version consistency
         shell: powershell
         run: .\tests\release_consistency_smoke.ps1

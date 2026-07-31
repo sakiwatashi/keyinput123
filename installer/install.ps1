@@ -8,6 +8,23 @@
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "native_ui_preference.ps1")
 . (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
+
+function Find-PimeInstallRoot {
+    param([string[]]$RegistryPaths)
+    foreach ($registryPath in $RegistryPaths) {
+        if (Test-Path -LiteralPath $registryPath) {
+            $root = (Get-Item -LiteralPath $registryPath).GetValue("")
+            # A leftover key whose directory was deleted by hand must count as
+            # "not installed". Trusting the bare value skipped the bundled
+            # PIME installer and failed one step later with "A valid PIME
+            # installation directory was not found" (first real-user report).
+            if ($root -and (Test-Path -LiteralPath $root)) {
+                return $root
+            }
+        }
+    }
+    return $null
+}
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
@@ -43,28 +60,18 @@ try {
         "HKLM:\Software\PIME",
         "HKLM:\Software\WOW6432Node\PIME"
     )
-    $installRoot = $null
-    foreach ($registryPath in $registryPaths) {
-        if (Test-Path -LiteralPath $registryPath) {
-            $installRoot = (Get-Item -LiteralPath $registryPath).GetValue("")
-            if ($installRoot) { break }
-        }
-    }
+    $installRoot = Find-PimeInstallRoot -RegistryPaths $registryPaths
 
     # PIME is shared infrastructure. Install the bundled signed version only
-    # when no PIME is present; never downgrade or replace an existing version.
+    # when no usable PIME is present; never downgrade or replace an existing
+    # version.
     if (-not $installRoot) {
         $process = Start-Process -FilePath $pimeInstaller -ArgumentList "/S" -Wait -PassThru
         if ($process.ExitCode -ne 0) {
             throw "PIME installation failed with exit code $($process.ExitCode)."
         }
         $installedPimeThisRun = $true
-        foreach ($registryPath in $registryPaths) {
-            if (Test-Path -LiteralPath $registryPath) {
-                $installRoot = (Get-Item -LiteralPath $registryPath).GetValue("")
-                if ($installRoot) { break }
-            }
-        }
+        $installRoot = Find-PimeInstallRoot -RegistryPaths $registryPaths
     }
 
     if (-not $installRoot -or -not (Test-Path -LiteralPath $installRoot)) {
@@ -335,6 +342,17 @@ public static class SmartPriorityNativeMethods {
         Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
     }
     Write-Output "Installed: $targetModule"
+}
+catch {
+    # The failure dialog points users at this log, but an uncaught error only
+    # prints after the finally below has stopped the transcript, so the log
+    # ended empty on the first real-user failure. Record the error, then
+    # rethrow: the NSIS details pane still shows it and the exit code stays
+    # nonzero.
+    Write-Output "安裝失敗: $($_.Exception.Message)"
+    Write-Output $_.InvocationInfo.PositionMessage
+    Write-Output $_.ScriptStackTrace
+    throw
 }
 finally {
     Stop-Transcript | Out-Null

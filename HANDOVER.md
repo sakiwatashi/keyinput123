@@ -143,6 +143,7 @@ PIME 的 python 伺服器也從未啟動** —— 表示沒有任何應用程式
 python -m unittest discover -s tests -v
 .\tests\release_consistency_smoke.ps1
 .\tests\installer_payload_smoke.ps1
+.\tests\installer_resilience_smoke.ps1
 .\tests\candidate_ui_policy_smoke.ps1
 .\tests\restore_signed_text_service_smoke.ps1
 .\tests\native_ui_preference_smoke.ps1
@@ -162,3 +163,22 @@ python -m unittest discover -s tests -v
 - `probe_caret.ps1` —— 比較 `GetGUIThreadInfo` 與 UI Automation 的游標定位可行性
 - `fake_beacon.ps1` —— 建立假的 `LibImeWindow` 測試信標跟隨與 z-order
 - `toggle_candidate_ui.ps1` —— 開關行程外候選視窗並重啟 PIME
+
+## 8. 後續更新（2026-08-01，v0.6.6）
+
+第一位外部使用者安裝 0.6.5 失敗，牽出兩個安裝程式缺陷，連同候選視窗預設值
+一併修正發佈：
+
+- **殘留 PIME 登錄鍵誤判**：使用者機器留有指向已刪除目錄的 `HKLM\Software\PIME`
+  鍵，install.ps1 只讀值不驗路徑，誤判「已安裝」而跳過隨附 PIME，隨後以
+  "A valid PIME installation directory was not found" 失敗。現在偵測一律經
+  `Find-PimeInstallRoot` 驗證目錄存在，殘留鍵視同未安裝。
+- **install.log 吞掉錯誤**：`try/finally` 沒有 `catch`，未攔截的 throw 要等
+  transcript 關閉後才印出，log 只有頭尾、內容空白（診斷全靠 NSIS 視窗截圖）。
+  install/uninstall 現在都會先把錯誤寫進 transcript 再重拋。
+- **行程外候選視窗改為預設開啟**：同一位使用者把藏在 JSON 的 opt-in 理解成
+  「功能沒實裝」。規則改為只有明確 `{"enabled": false}` 才關閉；
+  `toggle_candidate_ui.ps1 -Off` 因此改寫入明確 false（刪檔＝回到預設＝開啟）。
+- 新增 `tests/installer_resilience_smoke.ps1` 守住前兩項，已接入 CI。
+- 診斷時間軸與判讀方法（同秒開始結束的空 log ＝ 沒跑隨附安裝就拋錯）值得
+  記住：比登錄檔快照更能區分「走了哪條路」。
