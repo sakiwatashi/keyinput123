@@ -9,7 +9,11 @@
 - 最新版本：**v0.6.6**，安裝檔由 CI 自動建置發布
 - 舊 repo `sakiwatashi/inputmethod` 已封存唯讀，release 與 tag 皆已刪除，
   README 有搬遷公告。**不要再往那裡推東西。**
-- 版控乾淨，本機與遠端同步。
+- 版控乾淨，本機與遠端同步。**注意本機 git 結構**：開發在外層 repo 的工作
+  分支（本專案是 `pime-bopomofo-core/` 子目錄），GitHub 的 `main` 對應本機
+  `ime-standalone` 分支（獨立歷史）；發布靠子樹重建同步，完整步驟見
+  `AI_MAINTENANCE.md` 的「發布流程」。工作分支的 upstream 指向已封存的舊
+  repo，不要直接 `git push`。
 
 ## 2. 這次做了什麼
 

@@ -124,6 +124,43 @@ python -m unittest discover -s tests -v
 
 不要沿用舊安裝包的 SHA-256；每次建置都會產生新的雜湊。
 
+### 發布流程（git 結構與步驟）
+
+本機的 git 結構不寫下來就是地雷，因為它和直覺相反：
+
+- 開發在**外層 repo**（`New project 2`）的工作分支進行，本專案位於
+  `pime-bopomofo-core/` 子目錄。工作分支的 upstream 指向已封存的舊 repo
+  `inputmethod`，該遠端分支已不存在（`[gone]`）——**絕對不要在工作分支直接
+  `git push`**。
+- GitHub 正式 repo `keyinput123` 的 `main` 對應本機的 **`ime-standalone`
+  分支**：一條以子目錄內容為根的**獨立歷史**，與工作分支沒有共同祖先，
+  commit 訊息相同但 hash 不同。內容靠子樹重建保持一致。
+
+發布新版（v0.6.6 實測）：
+
+1. 在工作分支完成修改、跑完驗證清單、更新六處版本號、提交
+   `release: 發布智慧優先注音 X.Y.Z`。
+2. 把每個尚未同步的 commit 重建到 `ime-standalone`（Git Bash，訊息沿用）：
+
+   ```bash
+   PREV=$(git rev-parse ime-standalone)
+   for C in <依序列出未同步的 commit>; do
+     TREE=$(git rev-parse "$C:pime-bopomofo-core")
+     NEW=$(git log --format=%B -n 1 "$C" | git commit-tree "$TREE" -p "$PREV")
+     PREV=$NEW
+   done
+   git update-ref refs/heads/ime-standalone "$PREV"
+   ```
+
+3. 驗證同步：`git diff ime-standalone "HEAD:pime-bopomofo-core"` 必須為空。
+4. 在 `ime-standalone` 上打附註 tag：
+   `git tag -a vX.Y.Z ime-standalone -m "release: 智慧優先注音 X.Y.Z ..."`
+5. 推送：`git push keyinput ime-standalone:main`、`git push keyinput vX.Y.Z`。
+6. CI（`windows.yml`）在 tag 上跑完全部測試後自動建置安裝檔並發佈 Release，
+   幾分鐘後到 GitHub Releases 確認 exe 與 `SHA256SUMS.txt` 都在。
+
+文件類的後續修訂可以照步驟 2–3、5 再同步一次、直接推 `main`，不打新 tag。
+
 ### 授權頁編碼
 
 NSIS 在 `Unicode True` 之下會以系統 ANSI 字碼頁讀取授權檔，除非該檔帶 UTF-8 BOM。
