@@ -310,6 +310,8 @@ class PinnedBopomofoTextService(TextService):
             VK_DOWN,
             VK_LEFT,
             VK_RIGHT,
+            VK_PRIOR,
+            VK_NEXT,
         ):
             return True
         if keyEvent.keyCode == VK_DOWN:
@@ -380,6 +382,8 @@ class PinnedBopomofoTextService(TextService):
             VK_DOWN,
             VK_LEFT,
             VK_RIGHT,
+            VK_PRIOR,
+            VK_NEXT,
         ):
             self._navigate_candidate_menu(keyEvent.keyCode)
             return True
@@ -994,25 +998,56 @@ class PinnedBopomofoTextService(TextService):
         return bool(text) and all(character in BOPOMOFO_TEXT for character in text)
 
     def _navigate_candidate_menu(self, key_code: int) -> None:
-        """Navigate a ten-item, two-column page without letter labels."""
+        """Navigate a ten-item, two-column page without letter labels.
+
+        The window paints a vertical-first grid: labels 1-5 run down the left
+        column and 6-0 down the right, so Right/Left hop between the columns
+        of the same row, as in Microsoft Bopomofo's expanded grid. They turn
+        the page only when leaving the grid at its outer column, keeping the
+        row. PageDown/PageUp always turn pages and land on the first cell.
+        Down/Up walk the page linearly and roll over at its edges.
+        """
         candidates, _ = self._candidate_target()
         if not candidates:
             return
         visible = self._visible_candidates(candidates)
         cursor = min(self.candidateCursor, len(visible) - 1)
+        column_height = CANDIDATE_PAGE_SIZE // 2
 
         last_page = max(0, (len(candidates) - 1) // CANDIDATE_PAGE_SIZE)
         target = cursor
-        if key_code == VK_RIGHT and self.candidate_page < last_page:
-            self.candidate_page += 1
-            visible = self._visible_candidates(candidates)
-            target = 0
-            self.setCandidateList(visible)
-        elif key_code == VK_LEFT and self.candidate_page > 0:
-            self.candidate_page -= 1
-            visible = self._visible_candidates(candidates)
-            target = min(cursor, len(visible) - 1)
-            self.setCandidateList(visible)
+        if key_code == VK_RIGHT:
+            if cursor < column_height and cursor + column_height < len(visible):
+                # Same row, right column: 1 hops to 6 instead of paging.
+                target = cursor + column_height
+            elif self.candidate_page < last_page:
+                self.candidate_page += 1
+                visible = self._visible_candidates(candidates)
+                # Landing from the right column keeps the row on the new page.
+                target = cursor - column_height if cursor >= column_height else cursor
+                self.setCandidateList(visible)
+        elif key_code == VK_LEFT:
+            if cursor >= column_height:
+                target = cursor - column_height
+            elif self.candidate_page > 0:
+                self.candidate_page -= 1
+                visible = self._visible_candidates(candidates)
+                # Pages before the last are always full, so the same row of
+                # the right column exists.
+                target = cursor + column_height
+                self.setCandidateList(visible)
+        elif key_code == VK_NEXT:
+            if self.candidate_page < last_page:
+                self.candidate_page += 1
+                visible = self._visible_candidates(candidates)
+                target = 0
+                self.setCandidateList(visible)
+        elif key_code == VK_PRIOR:
+            if self.candidate_page > 0:
+                self.candidate_page -= 1
+                visible = self._visible_candidates(candidates)
+                target = 0
+                self.setCandidateList(visible)
         elif key_code == VK_DOWN:
             if cursor + 1 < len(visible):
                 target = cursor + 1

@@ -367,7 +367,7 @@ def main() -> None:
             if choice.width == 1 and choice.text == second_candidate
         )
         for page_offset in range(single_choice_index // 10):
-            special_key(service, 0x27, 10 + page_offset)
+            special_key(service, 0x22, 10 + page_offset)  # VK_NEXT, next page
         candidate_selection_key(
             service, single_choice_index % 10, 10 + single_choice_index // 10
         )  # physical number, even when charCode is absent
@@ -831,7 +831,7 @@ def main() -> None:
             if choice.width == 1 and choice.text == "字"
         )
         for _ in range(zi_choice // 10):
-            special_key(relearn_service, 0x27, sequence)  # next page
+            special_key(relearn_service, 0x22, sequence)  # VK_NEXT, next page
             sequence += 1
         candidate_selection_key(relearn_service, zi_choice % 10, sequence)
         sequence += 1
@@ -1505,16 +1505,36 @@ def main() -> None:
         assert open_reply["showCandidates"] is True
         assert len(expanded_service.candidateList) == 10
         first_page = list(expanded_service.candidateList)
-        next_page_reply = special_key(
-            expanded_service, 0x27, sequence + 3
-        )
-        assert next_page_reply["showCandidates"] is True
+        # Right from the left column hops to the same row of the right
+        # column (1 to 6), never straight to the next page.
+        column_reply = special_key(expanded_service, 0x27, sequence + 3)
+        assert column_reply["showCandidates"] is True
+        assert expanded_service.candidate_page == 0
+        assert expanded_service.candidateCursor == 5
+        assert list(expanded_service.candidateList) == first_page
+        # Right from the right column crosses to the next page, same row.
+        special_key(expanded_service, 0x27, sequence + 4)
         assert expanded_service.candidate_page == 1
         assert expanded_service.candidateList
         assert expanded_service.candidateList != first_page
         assert expanded_service.candidateCursor == 0
-        special_key(expanded_service, 0x25, sequence + 4)  # Left = prior page
+        # Left from the left column returns to the right column of page one.
+        special_key(expanded_service, 0x25, sequence + 5)
         assert expanded_service.candidate_page == 0
+        assert expanded_service.candidateCursor == 5
+        assert list(expanded_service.candidateList) == first_page
+        # Left inside the page walks back to the left column.
+        special_key(expanded_service, 0x25, sequence + 6)
+        assert expanded_service.candidate_page == 0
+        assert expanded_service.candidateCursor == 0
+        # PageDown/PageUp are the dedicated paging keys and land on the
+        # first cell, as in Microsoft Bopomofo.
+        special_key(expanded_service, 0x22, sequence + 7)  # VK_NEXT
+        assert expanded_service.candidate_page == 1
+        assert expanded_service.candidateCursor == 0
+        special_key(expanded_service, 0x21, sequence + 8)  # VK_PRIOR
+        assert expanded_service.candidate_page == 0
+        assert expanded_service.candidateCursor == 0
 
         down_page_service = PinnedBopomofoTextService(DummyClient())
         press(down_page_service, "g", sequence + 5)
