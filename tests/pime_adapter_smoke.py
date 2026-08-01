@@ -20,6 +20,7 @@ sys.path.insert(0, str(PIME_ROOT / "python"))
 sys.path.insert(0, str(PROJECT_ROOT / "dist" / "PIME-overlay" / "python" / "input_methods"))
 
 from pinned_bopomofo.pinned_bopomofo_ime import PinnedBopomofoTextService
+from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
 from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
 from pime_all_readings_audit import audit_all_readings
@@ -313,6 +314,13 @@ def main() -> None:
         ) as preference_handle:
             preference_handle.write('{"enabled": false}')
         service = PinnedBopomofoTextService(DummyClient())
+        # This service corrects 你 and later commits; with commit-time phrase
+        # learning that would teach the shared store and change what later
+        # sections see when they re-type the same readings. Keep its lessons
+        # in a file of its own.
+        service.phrase_store = PhraseStore(
+            os.path.join(appdata, "menu-section-phrases.json")
+        )
 
         # Match Microsoft Bopomofo's vertical-first grid: 1-5 in the left
         # column, 6-0 in the right column, and no letter selectors.
@@ -379,6 +387,55 @@ def main() -> None:
         assert service.session.preedit == ""
         assert service.focus_index == 0
         assert service._candidate_segment_index() == 1
+
+        # Committing a hand-corrected composition must feed the personal
+        # phrase store, and re-typing the same readings must start from the
+        # corrected text. A lone pinned character is not enough: context
+        # ranking flips it back, which users read as "my choice was
+        # forgotten" (first real-user report: 魔物獵人 → 麼惡獵人 again).
+        # The phrase store is pointed at its own file so the lesson stays
+        # out of the sections below; pins behave as in the section above.
+        learn_service = PinnedBopomofoTextService(DummyClient())
+        learn_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "commit-learn-phrases.json")
+        )
+        for key, seq in (
+            ("s", 930), ("u", 931), ("3", 932), ("c", 933), ("l", 934), ("3", 935)
+        ):
+            press(learn_service, key, seq)
+        assert len(learn_service.segments) == 2
+        default_first = learn_service.segments[0].text
+        special_key(learn_service, 0x25, 936)
+        special_key(learn_service, 0x25, 937)  # caret before the first char
+        special_key(learn_service, 0x28, 938)  # open the menu on segment 0
+        corrected = next(
+            candidate
+            for candidate in learn_service.segments[0].candidates
+            if candidate != default_first
+            and not learn_service._is_literal_bopomofo(candidate)
+        )
+        corrected_index = next(
+            index
+            for index, choice in enumerate(learn_service.candidate_choices)
+            if choice.width == 1 and choice.text == corrected
+        )
+        for page_offset in range(corrected_index // 10):
+            special_key(learn_service, 0x22, 939 + page_offset)  # VK_NEXT
+        candidate_selection_key(learn_service, corrected_index % 10, 944)
+        assert learn_service.compositionString == corrected + "好"
+        commit_reply = special_key(learn_service, 0x0D, 945)  # VK_RETURN
+        assert commit_reply["commitString"] == corrected + "好"
+        assert (
+            learn_service.phrase_store.exact(["ㄋㄧˇ", "ㄏㄠˇ"])
+            == corrected + "好"
+        )
+        for key, seq in (
+            ("s", 946), ("u", 947), ("3", 948), ("c", 949), ("l", 950), ("3", 951)
+        ):
+            press(learn_service, key, seq)
+        assert learn_service.compositionString == corrected + "好", (
+            learn_service.compositionString
+        )
 
         # Editing the first syllable of a longer uncommitted sentence must
         # put single-character choices before whole-sentence choices. Choosing

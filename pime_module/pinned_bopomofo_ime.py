@@ -18,7 +18,11 @@ from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.keymap import symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
-from .bopomofo_core.phrase_store import MAX_PHRASE_LENGTH, PhraseStore
+from .bopomofo_core.phrase_store import (
+    MAX_PHRASE_LENGTH,
+    MIN_PHRASE_LENGTH,
+    PhraseStore,
+)
 from .bopomofo_core.phonetic_corrector import PhoneticCorrector
 from .bopomofo_core.pinned_store import PinnedStore
 from .bopomofo_core.session import CandidateSession
@@ -101,6 +105,10 @@ class BufferedSyllable:
     candidates: list[str]
     selected: int = 0
     locked: bool = False
+    # True only when the user explicitly chose this segment's text. Commit
+    # uses it to tell a hand-corrected composition apart from the engine's
+    # own guesses, which must never teach the personal lexicon.
+    user_corrected: bool = False
 
     @property
     def text(self) -> str:
@@ -1122,6 +1130,7 @@ class PinnedBopomofoTextService(TextService):
             )[: self.session.max_candidates]
             segment.selected = 0
             segment.locked = True
+            segment.user_corrected = True
         # Move past the chosen word. The next character to the right becomes
         # the next edit target, just like a single-character selection.
         self.focus_index = choice.end - 1
@@ -1191,6 +1200,7 @@ class PinnedBopomofoTextService(TextService):
             # correction 你先開始下一步吧. A choice made explicitly in this
             # composition still arrives with advance_focus=True and is locked.
             locked=advance_focus,
+            user_corrected=advance_focus,
         )
         insertion = (
             self.replacement_index
@@ -1328,6 +1338,21 @@ class PinnedBopomofoTextService(TextService):
         if not text:
             self._bell("沒有可以送出的文字")
             return
+        # A composition the user corrected by hand is the strongest personal
+        # signal there is, yet it used to vanish at commit: only whole-choice
+        # picks learned phrases, so a sentence assembled from per-character
+        # fixes was forgotten and the next conversion repeated the old
+        # default (first real-user report: a corrected 魔物獵人 re-typed as
+        # 麼惡獵人). Engine-only output stays unlearned on purpose — commits
+        # the user never touched must not reinforce themselves.
+        if (
+            len(self.segments) >= MIN_PHRASE_LENGTH
+            and any(segment.user_corrected for segment in self.segments)
+            and all(len(segment.text) == 1 for segment in self.segments)
+        ):
+            self.phrase_store.learn(
+                [segment.reading for segment in self.segments], text
+            )
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
