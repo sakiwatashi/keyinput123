@@ -6,7 +6,7 @@
 ## 1. 專案現況
 
 - 正式位置：https://github.com/sakiwatashi/keyinput123
-- 最新版本：**v0.6.7**，安裝檔由 CI 自動建置發布
+- 最新版本：**v0.6.8**，安裝檔由 CI 自動建置發布
 - 舊 repo `sakiwatashi/inputmethod` 已封存唯讀，release 與 tag 皆已刪除，
   README 有搬遷公告。**不要再往那裡推東西。**
 - 版控乾淨，本機與遠端同步。**注意本機 git 結構**：開發在外層 repo 的工作
@@ -198,3 +198,13 @@ python -m unittest discover -s tests -v
   組句含使用者親手選過的字，送出即整句學習（引擎自己的預設輸出刻意
   不學，避免錯誤轉換自我強化）。`BufferedSyllable.user_corrected` 是
   「使用者動過」的判準，與 `locked`（排名鎖定）刻意分開。
+
+## 10. 後續更新（2026-08-01，v0.6.8）
+
+- **解除安裝「檔案使用中」失敗**（真實回報，0.6.6 機器）：停止候選窗輔助
+  程式後沒等它真正退出就刪模組目錄。候選窗預設開啟後這個競態變成常態。
+  修正：`Stop-SmartPriorityCandidateUiAndWait`（停止後 WaitForExit）＋
+  `Remove-DirectoryWithRetry`（0.5 秒×10 次），安裝升級路徑與解除安裝
+  皆套用，`installer_resilience_smoke` 守門。
+- 升級一律**不需要**先解除安裝：直接執行新版 exe 選「是」。已存在的舊版
+  解除安裝腳本仍是壞的，升級後才會被換成修好的版本。
