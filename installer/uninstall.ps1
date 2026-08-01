@@ -1,5 +1,37 @@
 ﻿$ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
+
+function Stop-SmartPriorityCandidateUiAndWait {
+    # Stop-Process only signals termination; the executable stays locked
+    # until the process has actually exited, and deleting the module
+    # directory inside that window fails with "file in use" (real uninstall
+    # failure report, 2026-08-01 — the helper runs on every machine now
+    # that the out-of-process window ships enabled).
+    $helpers = @(Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue)
+    foreach ($helper in $helpers) {
+        Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($helper in $helpers) {
+        try { $helper.WaitForExit(5000) | Out-Null } catch {}
+    }
+}
+
+function Remove-DirectoryWithRetry {
+    param([string]$Path)
+    # Just-terminated processes and antivirus scans can hold a lock for a
+    # beat longer; a few short retries beat failing the whole run.
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            if ($attempt -eq 10) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $profileGuid = "{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $textServiceGuid = "{35F67E9D-A54D-4177-9697-8B0AB71A9E04}"
@@ -46,11 +78,8 @@ try {
         }
         # The candidate window helper keeps its own executable open inside the
         # module directory that is about to be removed.
-        Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue |
-            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $targetModule) {
-            Remove-Item -LiteralPath $targetModule -Recurse -Force
-        }
+        Stop-SmartPriorityCandidateUiAndWait
+        Remove-DirectoryWithRetry -Path $targetModule
 
         if ((Test-Path -LiteralPath (Join-Path $nativeStateRoot "native-ui.json")) -and
             (Test-Path -LiteralPath (Join-Path $nativeStateRoot "backup"))) {

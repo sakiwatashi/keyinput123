@@ -34,6 +34,23 @@ if ($uses -lt 2) {
     $problems += "install.ps1 must resolve the PIME root through Find-PimeInstallRoot both before and after installing the bundled PIME (found $uses call sites)"
 }
 
+# --- 1b. Stopping the helper must wait for its exit, and module removal
+#         must retry. Stop-Process alone races the file lock: the helper
+#         runs on every machine now that the candidate window ships
+#         enabled, and uninstall failed with "file in use" on a real
+#         user's machine (2026-08-01). ---
+foreach ($entry in @(
+    @{ Name = "install.ps1"; Text = $install },
+    @{ Name = "uninstall.ps1"; Text = $uninstall }
+)) {
+    if ($entry.Text -notmatch 'WaitForExit') {
+        $problems += "$($entry.Name) no longer waits for SmartPriorityCandidateUI to exit after stopping it"
+    }
+    if ($entry.Text -notmatch 'Remove-DirectoryWithRetry') {
+        $problems += "$($entry.Name) no longer retries the module-directory removal"
+    }
+}
+
 # --- 2. Failures must reach the log the dialog points at ---
 foreach ($entry in @(
     @{ Name = "install.ps1"; Text = $install },

@@ -25,6 +25,38 @@ function Find-PimeInstallRoot {
     }
     return $null
 }
+
+function Stop-SmartPriorityCandidateUiAndWait {
+    # Stop-Process only signals termination; the executable stays locked
+    # until the process has actually exited, and touching the module
+    # directory inside that window fails with "file in use" (real uninstall
+    # failure report, 2026-08-01 — the helper runs on every machine now
+    # that the out-of-process window ships enabled).
+    $helpers = @(Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue)
+    foreach ($helper in $helpers) {
+        Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($helper in $helpers) {
+        try { $helper.WaitForExit(5000) | Out-Null } catch {}
+    }
+}
+
+function Remove-DirectoryWithRetry {
+    param([string]$Path)
+    # Just-terminated processes and antivirus scans can hold a lock for a
+    # beat longer; a few short retries beat failing the whole run.
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            if ($attempt -eq 10) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
 $tip = "0404:{35F67E9D-A54D-4177-9697-8B0AB71A9E04}{26EA5CF3-D515-40BE-9535-E7E98D5EE554}"
 $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
@@ -96,8 +128,7 @@ try {
     # The out-of-process candidate window lives inside the module directory and
     # holds its own executable open, which would block replacing that
     # directory. It is disposable and the input method relaunches it on demand.
-    Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    Stop-SmartPriorityCandidateUiAndWait
 
     $targetParent = Join-Path $resolvedRoot "python\input_methods"
     $targetModule = Join-Path $targetParent $moduleName
@@ -105,9 +136,7 @@ try {
     if ([IO.Path]::GetFullPath($targetModule) -ne $expectedTarget) {
         throw "Refusing to write to an unexpected module path."
     }
-    if (Test-Path -LiteralPath $targetModule) {
-        Remove-Item -LiteralPath $targetModule -Recurse -Force
-    }
+    Remove-DirectoryWithRetry -Path $targetModule
     New-Item -ItemType Directory -Path $targetModule -Force | Out-Null
     Get-ChildItem -LiteralPath $overlayModule -Force |
         Copy-Item -Destination $targetModule -Recurse -Force
