@@ -112,9 +112,47 @@ class PhraseStore:
 
         for key in redundant:
             self._entries.pop(key, None)
-        if redundant:
+
+        removed = len(redundant) + self._drop_sliding_windows()
+        if removed:
             self.save()
-        return len(redundant)
+        return removed
+
+    def _drop_sliding_windows(self) -> int:
+        """Drop entries that are only one step apart from another entry.
+
+        Containment cannot reach the widest entries: a sentence longer than
+        MAX_PHRASE_LENGTH produced a chain of maximum-width windows, and no
+        window contains another, so all of them survived the first pass. In one
+        real store that left 119 twelve-character fragments of the same few
+        sentences.
+
+        A phrase somebody typed on purpose has no neighbour offset by exactly
+        one syllable. A window cut from a longer sentence always does, because
+        the next window starts one syllable later and overlaps by all but one.
+        That is the whole test.
+        """
+        parsed = {key: key.split(" ") for key in self._entries}
+        keys_by_first = {}
+        for key, readings in parsed.items():
+            keys_by_first.setdefault(readings[0], []).append(key)
+
+        chained = set()
+        for key, readings in parsed.items():
+            if len(readings) < MAX_PHRASE_LENGTH:
+                continue
+            # A neighbour starting one syllable later, overlapping everywhere else.
+            for other in keys_by_first.get(readings[1], ()):
+                if other == key:
+                    continue
+                if parsed[other][: len(readings) - 1] == readings[1:]:
+                    chained.add(key)
+                    chained.add(other)
+                    break
+
+        for key in chained:
+            self._entries.pop(key, None)
+        return len(chained)
 
     def best_suffix(self, readings: list[str]) -> tuple[int, str]:
         max_width = min(MAX_PHRASE_LENGTH, len(readings))

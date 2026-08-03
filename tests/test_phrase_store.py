@@ -58,9 +58,6 @@ class PhraseStoreTests(unittest.TestCase):
             self.assertEqual([], list(path.parent.glob("*.tmp")))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class LearnScopeTest(unittest.TestCase):
     """learn() must not manufacture every substring of a sentence.
 
@@ -124,6 +121,33 @@ class PruneRedundantTest(unittest.TestCase):
         self.assertEqual(0, store.prune_redundant())
         self.assertEqual("電話", store.exact(["ㄉㄧㄢˋ", "ㄏㄨㄚˋ"]))
 
+    def test_removes_sliding_windows_of_a_longer_sentence(self) -> None:
+        """Containment cannot reach maximum-width entries; nothing contains them.
+
+        A sentence longer than MAX_PHRASE_LENGTH used to leave a chain of
+        twelve-character windows, each overlapping the next by eleven. One real
+        store carried 119 of them.
+        """
+        store = PhraseStore(self.path)
+        sentence = "我要跟微軟一樣是右邊才是可編輯的"
+        readings = [f"ㄗ{index}" for index in range(len(sentence))]
+        for start in range(len(sentence) - 12 + 1):
+            store._entries[" ".join(readings[start : start + 12])] = (
+                sentence[start : start + 12]
+            )
+        self.assertGreater(len(store._entries), 1)
+        store.prune_redundant()
+        self.assertEqual(0, len(store._entries), "滑動視窗殘留")
+
+    def test_keeps_a_deliberate_maximum_length_phrase(self) -> None:
+        """A phrase typed on purpose has no neighbour offset by one syllable."""
+        store = PhraseStore(self.path)
+        readings = [f"ㄗ{index}" for index in range(12)]
+        store.learn(readings, "一二三四五六七八九十百千")
+        store.learn([f"ㄏ{index}" for index in range(4)], "另外一詞")
+        self.assertEqual(0, store.prune_redundant())
+        self.assertEqual(2, len(store._entries))
+
     def test_same_readings_but_different_text_is_kept(self) -> None:
         """Only an aligned match is redundant; a different choice is not."""
         store = PhraseStore(self.path)
@@ -132,3 +156,5 @@ class PruneRedundantTest(unittest.TestCase):
         self.assertEqual(0, store.prune_redundant())
         self.assertEqual("門號", store.exact(["ㄇㄣ˙", "ㄏㄠˇ"]))
 
+if __name__ == "__main__":
+    unittest.main()
