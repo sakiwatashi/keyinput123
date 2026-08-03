@@ -83,8 +83,14 @@ class RequestTrace:
             # user ends up running without choosing to.
             return False
 
-    def record(self, msg, reply) -> None:
-        """Append one line for a tracked callback. Never raises."""
+    def record(self, msg, reply, state=None) -> None:
+        """Append one line for a tracked callback. Never raises.
+
+        ``state`` carries the input method's own mode flags. Without them a
+        "passed" line is ambiguous: it looks identical whether English mode
+        let the key through or the key simply was not ours, and that ambiguity
+        cost a whole diagnosis round.
+        """
         try:
             if not self.enabled or self._lines >= MAX_LINES:
                 return
@@ -100,6 +106,10 @@ class RequestTrace:
                 parts.append(str(msg.get("guid", ""))[:8])
             if isinstance(reply, dict) and "return" in reply:
                 parts.append("handled" if reply["return"] else "passed")
+            if state:
+                # Mode flags only -- never anything about what was typed.
+                parts.append("英" if state.get("english_mode") else "中")
+                parts.append("鍵盤開" if state.get("keyboard_open") else "鍵盤關")
 
             with open(
                 os.path.join(_state_root(), LOG_NAME), "a", encoding="utf-8"

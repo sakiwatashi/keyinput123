@@ -195,7 +195,10 @@ class PinnedBopomofoTextService(TextService):
         reply = super().handleRequest(msg)
         # Off unless the user turns it on. Records which callbacks arrive, not
         # what was typed -- see bopomofo_core/request_trace.py.
-        request_trace.record(msg, reply)
+        request_trace.record(msg, reply, {
+            "english_mode": self.english_mode,
+            "keyboard_open": self.keyboardOpen,
+        })
         try:
             self._apply_beacon_mode(reply)
         except Exception:
