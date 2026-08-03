@@ -414,6 +414,13 @@ public static class SmartPriorityNativeMethods {
     if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
     }
+    # The candidate-window helper is deliberately NOT started here. This script
+    # runs elevated, so anything it launches inherits that -- an elevated tray
+    # icon launching an elevated control panel, neither of which needs it. It
+    # also inherits this process's output handles, and a long-running child
+    # holding them keeps the caller waiting forever: the installer looked hung
+    # while the log already said it had finished. install.ps1 starts the helper
+    # after elevation returns, in the user's own session.
     Write-Output "Installed: $targetModule"
 }
 catch {

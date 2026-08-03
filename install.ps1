@@ -31,6 +31,30 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     if ($process.ExitCode -ne 0) {
         throw "Installation failed with exit code $($process.ExitCode)."
     }
+    # Start the candidate-window helper here, after elevation has returned and
+    # in the user's own session. It hosts the notification-area icon, which is
+    # the only obvious way into the control panel; without this the icon was
+    # missing after every install until the user happened to type something,
+    # because the input method only launches the helper on the first keystroke.
+    #
+    # Not from the elevated script: that would leave the tray icon -- and the
+    # control panel it opens -- running as administrator, and a long-running
+    # child holding the elevated process's output handles made the installer
+    # appear to hang long after it had finished.
+    $helperExecutable = Join-Path $projectRoot "dist\PIME-overlay\python\input_methods\pinned_bopomofo\helper\SmartPriorityCandidateUI.exe"
+    $installedHelper = Join-Path ${env:ProgramFiles(x86)} "PIME\python\input_methods\pinned_bopomofo\helper\SmartPriorityCandidateUI.exe"
+    if (Test-Path -LiteralPath $installedHelper) {
+        try {
+            # The helper takes a single-instance lock, so a second copy exits
+            # immediately; starting it unconditionally is safe.
+            Start-Process -FilePath $installedHelper -ErrorAction Stop | Out-Null
+        }
+        catch {
+            # Disposable: the input method starts it on demand anyway.
+            Write-Output "Note: could not start the candidate window helper ($($_.Exception.Message))."
+        }
+    }
+
     Write-Output "Smart Priority Bopomofo installation completed."
     exit 0
 }
