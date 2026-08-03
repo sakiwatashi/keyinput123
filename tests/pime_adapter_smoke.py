@@ -19,7 +19,10 @@ PIME_ROOT = Path(os.environ.get("PIME_ROOT", r"C:\Program Files (x86)\PIME"))
 sys.path.insert(0, str(PIME_ROOT / "python"))
 sys.path.insert(0, str(PROJECT_ROOT / "dist" / "PIME-overlay" / "python" / "input_methods"))
 
-from pinned_bopomofo.pinned_bopomofo_ime import PinnedBopomofoTextService
+from pinned_bopomofo.pinned_bopomofo_ime import (
+    PinnedBopomofoTextService,
+    SHIFT_TOGGLE_GUID,
+)
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
 from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
@@ -1841,6 +1844,59 @@ def main() -> None:
         assert composed and not syllable_service._is_literal_bopomofo(composed), (
             syllable_reply
         )
+
+        # The Shift toggle is registered with TSF as a preserved key. That
+        # route reaches us inside console windows and remote desktop clients
+        # such as AnyDesk, where the key-up sink does not — Microsoft Bopomofo
+        # switches language fine in exactly those places, which is what
+        # identified the route.
+        preserved_service = PinnedBopomofoTextService(DummyClient())
+        activation = preserved_service.handleRequest(
+            {"method": "onActivate", "seqNum": 2400, "isKeyboardOpen": False}
+        )
+        registered = activation.get("addPreservedKey") or []
+        shift_key = next(
+            (entry for entry in registered if entry["guid"] == SHIFT_TOGGLE_GUID),
+            None,
+        )
+        assert shift_key is not None, activation
+        assert shift_key["keyCode"] == 0x10, shift_key      # VK_SHIFT
+        assert shift_key["modifiers"] == 0x200, shift_key   # TF_MOD_ON_KEYUP
+
+        assert preserved_service.english_mode is False
+        preserved_reply = preserved_service.handleRequest(
+            {"method": "onPreservedKey", "seqNum": 2401, "guid": SHIFT_TOGGLE_GUID}
+        )
+        assert preserved_reply["return"] is True, preserved_reply
+        assert preserved_service.english_mode is True
+
+        # Somebody else's preserved key must not move our language mode.
+        other_reply = preserved_service.handleRequest(
+            {
+                "method": "onPreservedKey",
+                "seqNum": 2402,
+                "guid": "00000000-0000-0000-0000-000000000000",
+            }
+        )
+        assert other_reply["return"] is False, other_reply
+        assert preserved_service.english_mode is True
+
+        # One physical release reported by both routes must not cancel itself
+        # out. Once TSF has delivered the preserved key the fallback stands
+        # down, so the key-up path declines the release instead of toggling
+        # back — which would look exactly like the bug being fixed.
+        assert preserved_service.english_mode is True
+        filter_key(preserved_service, "filterKeyDown", 0x10, 2403, shift=True)
+        fallback = filter_key(preserved_service, "filterKeyUp", 0x10, 2404)
+        assert fallback["return"] is False, fallback
+        assert preserved_service.english_mode is True, "the fallback toggled back"
+
+        # Standing down must not cost the user a second press: another genuine
+        # Shift tap still switches back through the preserved key.
+        preserved_service.handleRequest(
+            {"method": "onPreservedKey", "seqNum": 2405, "guid": SHIFT_TOGGLE_GUID}
+        )
+        assert preserved_service.english_mode is False
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

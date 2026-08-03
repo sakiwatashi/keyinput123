@@ -71,6 +71,12 @@ SHIFTED_ASCII_FALLBACK = {
     VK_OEM_QUOTE: '"',
 }
 
+# TSF delivers a preserved key through ITfKeyStrokeMgr rather than the key
+# event sink. Defined here rather than imported so the module still loads on a
+# PIME build whose textService.py predates preserved-key support.
+TF_MOD_ON_KEYUP = 0x0200
+# Ours alone. Changing it would orphan the registration TSF already holds.
+SHIFT_TOGGLE_GUID = "f02200cc-713f-451d-8df5-56856e48d191"
 CTRL_PUNCTUATION = {
     (VK_OEM_COMMA, False): "，",
     (VK_OEM_PERIOD, False): "。",
@@ -145,6 +151,11 @@ class PinnedBopomofoTextService(TextService):
         self.last_key_event = None
         self.last_key_down_time = 0.0
         self.pending_shift_toggle = False
+        # Set once TSF has actually delivered the preserved key. Two routes
+        # reporting one release would toggle twice and look like nothing
+        # happening — the exact symptom this was written to fix — so the
+        # fallback stands down as soon as the better route proves itself.
+        self.shift_preserved_key_seen = False
 
         # Completed syllables remain in one TSF composition.  This keeps the
         # underline under the entire uncommitted run and makes every character
@@ -262,6 +273,19 @@ class PinnedBopomofoTextService(TextService):
             candPerRow=CANDIDATES_PER_ROW,
             candUseCursor=True,
         )
+        # Ask TSF itself to watch for a Shift release. Preserved keys travel a
+        # different route from ordinary key events, and that route survives
+        # places where the key-up sink does not: console windows, and remote
+        # desktop clients such as AnyDesk that grab the keyboard and forward it
+        # elsewhere. Microsoft Bopomofo switches language fine in exactly those
+        # places, which is the evidence that this route is the one that works.
+        # filterKeyUp stays as the fallback for hosts that never deliver it.
+        try:
+            self.addPreservedKey(VK_SHIFT, TF_MOD_ON_KEYUP, SHIFT_TOGGLE_GUID)
+        except Exception:
+            # An older PIME without preserved-key support must not stop the
+            # input method from loading; the fallback still works there.
+            pass
 
     def onDeactivate(self):
         # A persistent Shift toggle is useful inside the current field, but a
@@ -523,6 +547,13 @@ class PinnedBopomofoTextService(TextService):
         return False
 
     def filterKeyUp(self, keyEvent):
+        if self.shift_preserved_key_seen:
+            # TSF is reporting Shift releases as a preserved key, so handling
+            # them here as well would cancel out. TSF is documented to consume
+            # a preserved key rather than pass it to the key sink, but this
+            # does not depend on that being true everywhere.
+            self.last_key_down_time = 0.0
+            return False
         if (
             self.last_key_event is not None
             and self._is_shift_key(self.last_key_event.keyCode)
@@ -545,6 +576,20 @@ class PinnedBopomofoTextService(TextService):
             self._toggle_language_mode()
             return True
         return False
+
+    def onPreservedKey(self, guid):
+        """TSF reporting the Shift release it was asked to watch for.
+
+        This is the route that keeps working inside console windows and remote
+        desktop clients, where the key-up sink does not reach us.
+        """
+        if guid.lower() != SHIFT_TOGGLE_GUID:
+            return False
+        self.shift_preserved_key_seen = True
+        self.pending_shift_toggle = False
+        self.last_key_down_time = 0.0
+        self._toggle_language_mode()
+        return True
 
     @staticmethod
     def _is_shift_key(key_code: int) -> bool:
