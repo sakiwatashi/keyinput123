@@ -48,4 +48,40 @@ if ($missing.Count -gt 0) {
     throw ("The installer would ship without these scripts:`n  " + ($missing -join "`n  "))
 }
 
-Write-Output "PASS: every script the installer loads at run time is packaged"
+# A stray control character inside a path literal is invisible in an editor and
+# in a diff, but it breaks the path at run time. This shipped once: an escaping
+# slip while editing install.ps1 turned "WindowsPowerShell1.0" into a vertical
+# tab, so the Start-menu shortcut refused the target and the whole install
+# aborted with a bare exit code 1. Nothing else here reaches shortcut creation.
+$corrupt = @()
+foreach ($script in Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File) {
+    $text = [IO.File]::ReadAllText($script.FullName)
+    for ($index = 0; $index -lt $text.Length; $index++) {
+        $code = [int][char]$text[$index]
+        if ($code -lt 0x20 -and $text[$index] -notin @("`t", "`r", "`n")) {
+            $corrupt += ("{0}: 位置 {1} 有控制字元 0x{2:X2}" -f $script.Name, $index, $code)
+        }
+    }
+}
+if ($corrupt.Count -gt 0) {
+    throw ("Installer scripts contain control characters:`n  " + ($corrupt -join "`n  "))
+}
+
+# Every Windows path the installer builds from $env:WINDIR must actually exist.
+# The broken shortcut target was still a syntactically valid string; only
+# resolving it revealed the damage.
+$unresolved = @()
+foreach ($script in Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File) {
+    $text = [IO.File]::ReadAllText($script.FullName)
+    foreach ($match in [regex]::Matches($text, 'Join-Path\s+\$env:WINDIR\s+"([^"]+)"')) {
+        $candidate = Join-Path $env:WINDIR $match.Groups[1].Value
+        if (-not (Test-Path -LiteralPath $candidate)) {
+            $unresolved += "$($script.Name): $candidate"
+        }
+    }
+}
+if ($unresolved.Count -gt 0) {
+    throw ("Installer builds Windows paths that do not exist:`n  " + ($unresolved -join "`n  "))
+}
+
+Write-Output "PASS: installer scripts are packaged, free of control characters, and their Windows paths resolve"

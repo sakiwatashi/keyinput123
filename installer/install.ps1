@@ -164,7 +164,7 @@ try {
         $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
         $shortcutRoot = Join-Path $programs "智慧優先注音"
         New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
-        $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell1.0\powershell.exe"
+        $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path $shortcutRoot "智慧優先注音 控制台.lnk"))
         $shortcut.TargetPath = $powershell
