@@ -33,6 +33,9 @@ const COLORREF kBorder = RGB(218, 216, 211);
 const COLORREF kText = RGB(38, 37, 35);
 const COLORREF kLabel = RGB(111, 105, 96);
 const COLORREF kSelectedBackground = RGB(231, 235, 248);
+// Lighter than the selection so the two are never confused: this one only
+// says what a click would pick, not what Enter will commit.
+const COLORREF kHoverBackground = RGB(242, 243, 247);
 const COLORREF kSelectedLabel = RGB(72, 83, 145);
 
 void fillRoundRect(HDC hdc, const RECT& rect, int radius, COLORREF color) {
@@ -71,6 +74,7 @@ void candidateGrid(int itemCount, int maxColumns, int& rows, int& columns) {
 
 CandidateRenderer::CandidateRenderer():
     selection_(0),
+    hover_(-1),
     candPerRow_(2),
     useCursor_(true),
     dpi_(96),
@@ -106,12 +110,20 @@ void CandidateRenderer::setCandidates(const std::vector<std::wstring>& items,
     selectionKeys_ = selectionKeys;
     if (selection_ >= static_cast<int>(items_.size()))
         selection_ = 0;
+    // A new page means the pointer is over a different candidate than before.
+    hover_ = -1;
 }
 
 void CandidateRenderer::setSelection(int selection) {
     if (selection < 0 || selection >= static_cast<int>(items_.size()))
         selection = 0;
     selection_ = selection;
+}
+
+void CandidateRenderer::setHover(int hover) {
+    if (hover < 0 || hover >= static_cast<int>(items_.size()))
+        hover = -1;
+    hover_ = hover;
 }
 
 void CandidateRenderer::setCandPerRow(int candPerRow) {
@@ -206,6 +218,14 @@ void CandidateRenderer::paintItem(HDC hdc, int index, int x, int y) const {
         RECT selected = cell;
         ::InflateRect(&selected, -scaled(2), -scaled(1));
         fillRoundRect(hdc, selected, scaled(8), kSelectedBackground);
+    }
+    else if (index == hover_) {
+        // Drawn only where the real cursor is not, and in a lighter shade, so
+        // the candidate that Enter would commit always stays the loudest thing
+        // on screen.
+        RECT hovered = cell;
+        ::InflateRect(&hovered, -scaled(2), -scaled(1));
+        fillRoundRect(hdc, hovered, scaled(8), kHoverBackground);
     }
 
     int textY = y + scaled(6);

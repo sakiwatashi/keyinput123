@@ -52,6 +52,14 @@ public:
     void setCandidates(const std::vector<std::wstring>& items,
                        const std::wstring& selectionKeys);
     void setSelection(int selection);
+    // The mouse is tracked separately from selection_. They are different
+    // facts: selection_ mirrors the input method's real cursor, which is what
+    // Enter and Space commit, while the hover only previews what a click would
+    // pick. Letting the mouse write selection_ made the arrow keys look dead
+    // whenever the pointer rested over the window, and worse, what was
+    // highlighted stopped matching what would actually be sent.
+    void setHover(int hover);
+    int hover() const { return hover_; }
     void setCandPerRow(int candPerRow);
     void setUseCursor(bool useCursor);
 
@@ -75,6 +83,7 @@ private:
     std::vector<std::wstring> items_;
     std::wstring selectionKeys_;
     int selection_;
+    int hover_;
     int candPerRow_;
     bool useCursor_;
     int dpi_;

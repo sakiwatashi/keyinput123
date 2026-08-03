@@ -162,12 +162,40 @@ python -m unittest discover -s tests -v
 
 文件類的後續修訂可以照步驟 2–3、5 再同步一次、直接推 `main`，不打新 tag。
 
-### 授權頁編碼
+### UTF-8 BOM：兩條方向相反的規則
 
-NSIS 在 `Unicode True` 之下會以系統 ANSI 字碼頁讀取授權檔，除非該檔帶 UTF-8 BOM。
-`THIRD_PARTY_NOTICES.txt` 一度沒有 BOM，整個授權頁對使用者顯示為亂碼。任何含中文
-的授權檔都必須保留 BOM。同理，含中文的 PowerShell 腳本需要 BOM 才能被 Windows
-PowerShell 5.1 正確解析，C++ 原始碼需要 `/utf-8` 編譯選項。
+**這是本專案最容易造成災難的一件事。** 有些檔案沒有 BOM 就壞，有些檔案有了
+BOM 就壞，而兩者都不會給出有用的錯誤訊息。批次改檔的腳本尤其危險：一個
+「全部補上 BOM」的迴圈會同時修好一半、毀掉另一半。
+
+**必須有 BOM：**
+
+| 檔案 | 沒有 BOM 的後果 |
+|---|---|
+| 含中文的 `.ps1` | Windows PowerShell 5.1 解析錯誤，腳本無法執行 |
+| NSIS 授權檔（`THIRD_PARTY_NOTICES.txt` 等） | `Unicode True` 下以系統 ANSI 讀取，整頁亂碼 |
+
+**絕對不能有 BOM：**
+
+| 檔案 | 有 BOM 的後果 |
+|---|---|
+| **所有 `.json`**，尤其 `pime_module/ime.json` | PIMELauncher 以 jsoncpp 解析，**jsoncpp 不接受 BOM**：第 1 行第 1 欄丟出 `Json::RuntimeError`，沒有人接住，行程以 `__fastfail` 中止（`0xC0000409`）。**不產生當機傾印、不寫事件記錄。** 使用者只看到「輸入法不見了、只能打英文」，而登錄檔、檔案、版本全部顯示正常 |
+
+2026-08-04 就是這樣把使用者的輸入法弄到數小時完全不能用：升版腳本替每個
+目標檔補 BOM，`ime.json` 也被補了。當時往七個方向猜過原因（按鍵事件、TSF
+保留鍵、殘留狀態、防作弊、安裝損壞、AppInit 注入、`__pycache__`）全都是錯的；
+真正定案是用 Sysinternals `procdump` 抓下例外型別
+`E06D7363.?AVRuntimeError@Json@@`，一次就到位。
+
+**教訓：症狀是「行程立刻消失且系統毫無記錄」時，不要靠讀程式碼推論，直接抓
+例外。** `procdump -ma -t -x <資料夾> <執行檔>` 會在行程終止時傾印並印出例外
+型別。
+
+`tests/json_encoding_smoke.ps1` 現在會擋住 JSON 帶 BOM，
+`tests/release_consistency_smoke.ps1` 擋住授權檔缺 BOM，
+`tests/control_panel_smoke.ps1` 擋住控制台的 `.ps1` 缺 BOM。三者都已接入 CI。
+
+C++ 原始碼另外需要 `/utf-8` 編譯選項。
 
 ## 個人資料與隱私
 

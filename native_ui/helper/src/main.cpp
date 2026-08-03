@@ -326,16 +326,26 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_MOUSEMOVE: {
-        // Highlight what the click would choose, so the mapping is visible
-        // before committing to it.
+        // Preview what a click would choose. This must never write the real
+        // selection: that mirrors the input method's own cursor, and letting
+        // the pointer move it made the arrow keys appear dead while the mouse
+        // rested over the window -- every repaint or nudge snapped the
+        // highlight back under the pointer. It also meant the highlighted
+        // candidate could differ from the one Enter would actually commit.
         POINT point = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         int index = g_state.renderer.hitTest(point);
-        if (index >= 0 && index != g_state.renderer.selection()) {
-            g_state.renderer.setSelection(index);
+        if (index != g_state.renderer.hover()) {
+            g_state.renderer.setHover(index);
             ::InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
     }
+    case WM_MOUSELEAVE:
+        if (g_state.renderer.hover() >= 0) {
+            g_state.renderer.setHover(-1);
+            ::InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
     case WM_ERASEBKGND:
         return TRUE;
     case WM_MOUSEACTIVATE:

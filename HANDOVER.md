@@ -146,6 +146,8 @@ PIME 的 python 伺服器也從未啟動** —— 表示沒有任何應用程式
 ```powershell
 python -m unittest discover -s tests -v
 .\tests\release_consistency_smoke.ps1
+.\tests\json_encoding_smoke.ps1
+.\tests\restart_pime_smoke.ps1
 .\tests\control_panel_smoke.ps1
 .\tests\installer_payload_smoke.ps1
 .\tests\installer_resilience_smoke.ps1
@@ -169,6 +171,7 @@ python -m unittest discover -s tests -v
 - `fake_beacon.ps1` —— 建立假的 `LibImeWindow` 測試信標跟隨與 z-order
 - `toggle_candidate_ui.ps1` —— 開關行程外候選視窗並重啟 PIME
 - `trace_key_events.ps1` —— 記錄哪些 PIME 回呼真的被呼叫。**遇到「某個環境按鍵沒反應」時先跑這個再改程式**（見第 11 節）
+- **行程立刻消失且系統毫無記錄**時，用 Sysinternals procdump 抓例外，不要讀程式碼猜：`procdump -accepteula -ma -t -x <資料夾> <執行檔>`（見第 17 節）。PIMELauncher 自己的記錄檔在 `%LOCALAPPDATA%\PIME\Log\`
 
 ## 8. 後續更新（2026-08-01，v0.6.6）
 
@@ -378,3 +381,62 @@ UI 是控制台第四個分頁 `40-hidden.ps1`。門檻預設 0，避免開啟�
 打 `ㄉ` 顯示成 `我們好ㄉ`，字沒打完就看起來跳走）、`_accept_active_candidate`
 把完成的音節插在尾端。三處統一改為 `replacement_index` → `focus_index + 1`
 → 尾端。
+
+## 17. 事故（2026-08-04）：一個 BOM 讓輸入法數小時無法使用
+
+**這是本專案目前為止代價最高的一次錯誤，而且完全可以避免。**
+
+升版到 0.6.9 時，批次改檔的腳本替每個目標檔補上 UTF-8 BOM，`pime_module/ime.json`
+也被補了。PIMELauncher 以 jsoncpp 解析它，jsoncpp **不接受 BOM**：第 1 行第 1 欄
+丟出 `Json::RuntimeError`，沒有人接住，行程以 `__fastfail` 中止（`0xC0000409`）。
+
+**這條路徑不產生當機傾印、不寫事件記錄。** 使用者看到的只是「輸入法不見了、
+只能打英文」，而登錄檔、模組檔案、版本號、語言清單全部顯示正常。
+
+### 為什麼查了那麼久
+
+往七個方向猜過，全錯：按鍵放開事件、TSF 保留鍵、硬砍留下的殘留狀態、
+Riot Vanguard、PIME 安裝損壞、AppInit 全域注入、`__pycache__`。每一個都是
+**從程式碼推論**出來的。
+
+真正定案花不到五分鐘：Sysinternals `procdump` 抓下例外型別
+`E06D7363.?AVRuntimeError@Json@@`，一看就知道是 JSON 解析。
+
+```
+procdump -accepteula -ma -t -x <資料夾> <執行檔>
+```
+
+`-t` 是「行程終止時傾印」，會直接印出例外型別；`-x` 讓 procdump 負責啟動目標。
+另外 PIMELauncher 自己有記錄檔，位置是 **`%LOCALAPPDATA%\PIME\Log\`**（不是
+Roaming，我一開始找錯地方）。
+
+### 有一個假訊息讓事情更糟
+
+控制台與診斷腳本當時以 `Stop-Process` + `Start-Process` 重啟 PIME，然後
+**不檢查就回報「已重啟」**。啟動器早就起不來了，畫面上卻是成功，所以最初幾小時
+的診斷全都建立在「輸入法還在跑、只是 Shift 壞了」這個錯誤前提上。
+已修正為 `control_panel/restart_pime.ps1`，並由 `tests/restart_pime_smoke.ps1` 守門。
+
+### 守門
+
+- `tests/json_encoding_smoke.ps1` —— 專案內任何 `.json` 帶 BOM 即失敗
+- 兩條方向相反的 BOM 規則寫進 `AGENTS.md` 與 `AI_MAINTENANCE.md`
+
+### 影響範圍
+
+**只影響本機手動升版。** GitHub Releases 的安裝檔由 CI 建置，不經過那個補 BOM
+的腳本，所以下載使用者不受影響。
+
+## 18. 修正（2026-08-04）：滑鼠停在候選視窗上時方向鍵失效
+
+回報：滑鼠放在候選單上，方向鍵就選不動字。
+
+`WM_MOUSEMOVE` 直接呼叫 `renderer.setSelection()`，而那個欄位是**輸入法真正
+游標的鏡像**。方向鍵更新 Python 的游標並經管道傳過來後，滑鼠只要有任何微動
+就又覆蓋回去。
+
+更嚴重的是它不只是顯示問題：畫面高亮的候選可能和 Enter 實際送出的不是同一個。
+
+改為 `hover_` 獨立欄位，以較淡的底色繪製，且只在「不是真正游標」的格子上畫。
+`setSelection` 現在只由管道（輸入法）驅動，滑鼠永遠碰不到它。換頁時 `hover_`
+重設為 -1。另補上 `WM_MOUSELEAVE` 清除。

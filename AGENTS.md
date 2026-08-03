@@ -1,7 +1,26 @@
-# Repository instructions
+﻿# Repository instructions
 
 This is a Windows Traditional Chinese input method built on PIME and
 libchewing. Read `README.md` and `AI_MAINTENANCE.md` before making changes.
+
+## Never add a UTF-8 BOM to a JSON file
+
+PIMELauncher parses `pime_module/ime.json` with jsoncpp, which rejects a BOM
+outright: it throws an uncaught `Json::RuntimeError` and the process dies by
+`__fastfail` (`0xC0000409`) **with no crash dump and no event-log entry**. The
+input method simply disappears while every static check — registry, files,
+version — still looks correct.
+
+This is easy to do by accident because the opposite rule also holds here:
+a `.ps1` containing Chinese **must** have a BOM or Windows PowerShell 5.1
+cannot parse it. A script that adds BOMs in bulk will fix half the repo and
+break the other half. It has already cost a user hours of a dead input method.
+
+`tests/json_encoding_smoke.ps1` enforces this. Do not skip it.
+
+When a process vanishes instantly and Windows records nothing, stop reading
+code and capture the exception:
+`procdump -ma -t -x <folder> <exe>`. See `AI_MAINTENANCE.md`.
 
 ## Installation
 
@@ -16,6 +35,7 @@ Run after every behavior change:
 
 ```powershell
 python -m unittest discover -s tests -v
+./tests/json_encoding_smoke.ps1
 ./build_pime_overlay.ps1
 ```
 
