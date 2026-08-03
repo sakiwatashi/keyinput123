@@ -79,6 +79,16 @@ $suggestedThreshold = 7
             }
         }
 
+        # 預覽用的計算交給輸入法自己的 Python，規則才不會有第二份。
+        $python = if ($Context.PimeRoot) {
+            $candidate = Join-Path $Context.PimeRoot (Join-Path "python" (Join-Path "python3" "python.exe"))
+            if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+        } else { $null }
+        $lister = if ($Context.ModuleRoot) {
+            $candidate = Join-Path $Context.ModuleRoot "list_hidden.py"
+            if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+        } else { $null }
+
         $settings = & $readSettings
         $keepSet = $settings.Keep
         $hiddenSet = $settings.Hidden
@@ -195,23 +205,36 @@ $suggestedThreshold = 7
                 return
             }
 
-            $below = @(
-                $frequency.GetEnumerator() |
-                    Where-Object { $_.Value -lt $cut } |
-                    Sort-Object -Property @{ Expression = "Value"; Descending = $true }
-            )
-            foreach ($entry in $below) {
-                $character = $entry.Key
-                $index = $grid.Rows.Add($keepSet.Contains($character), $character, $entry.Value)
+            # 真正會被隱藏的那份清單，由輸入法自己的規則算出來（list_hidden.py
+            # 呼叫 bopomofo_core\hidden_characters.py）。單純列出「低於門檻」
+            # 是錯的：出現在內建詞庫的字與語氣詞都會被保護下來，門檻 7 的差別
+            # 是 1482 筆與 269 筆。規則只有一份，面板不重抄。
+            $report = $null
+            if ($python -and $lister) {
+                try { $report = & $python $lister $cut 2>$null | ConvertFrom-Json } catch { }
+            }
+            if ($null -eq $report) {
+                $summary.Text = "算不出實際會隱藏哪些字"
+                $hint.Text = "找不到 PIME 的 Python 或 list_hidden.py，無法預覽。門檻仍然會生效。"
+                return
+            }
+
+            foreach ($entry in $report.hidden) {
+                $character = [string]$entry.character
+                $index = $grid.Rows.Add($keepSet.Contains($character), $character, $entry.score)
                 if ($keepSet.Contains($character)) {
                     $grid.Rows[$index].DefaultCellStyle.ForeColor =
                         [System.Drawing.Color]::FromArgb(0, 120, 60)
                 }
             }
-            $summary.Text = "會隱藏 $($below.Count) 個字，另外保留 $($keepSet.Count) 個"
-            $hint.Text = ("由上而下是最接近門檻的字，也就是最需要看一眼的那批；想留下的勾「保留」。`r`n" +
-                          "門檻 1 特別安全：字頻表裡一個字都不會被動到，只隱藏表中完全沒收錄的字（眥、剚、襶 那類）。`r`n" +
-                          "字頻分不出好壞——恣 是 5 分而 祐 只有 1 分——所以門檻只是快速的第一刀，勾選才是判準。這裡只是隱藏，內建字典沒有被改。")
+            $summary.Text = ("會隱藏 $($report.hidden.Count) 個字" +
+                             "（低於門檻的有 $($report.below) 個，其中 $($report.protected) 個因為出現在內建詞庫而保留）")
+            $hint.Text = ("由上而下是最接近門檻的字，最需要看一眼；想留下的勾「保留」。`r`n" +
+                          "字頻表是 1996 年的書面語調查，看不到口語和成語用字——嗯 只有 7 分、囫 圇 釜 都是 0 分。" +
+                          "所以規則不是單純比分數：**出現在內建詞庫的字、以及語氣詞，一律保留**，門檻只處理剩下的。`r`n" +
+                          "這個保護讓可隱藏的字收斂在 270 個左右，不論門檻設多高——那才是真正的冷僻字。" +
+                          "它仍然不完美（孳、恣 因為出現在孳生、恣意而被保留；祐 不在詞庫裡而會被隱藏），所以勾選才是最終判準。" +
+                          "這裡只是隱藏，內建字典沒有被改。")
         }.GetNewClosure()
 
         $threshold.Add_ValueChanged($refresh)
