@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distRoot = Join-Path $projectRoot "dist\PIME-overlay"
@@ -30,6 +30,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\__init__.py") -Desti
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\ime.json") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\pinned_bopomofo_ime.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "feedback-report.ps1") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "control_panel") -Destination $moduleRoot -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moduleRoot -Force

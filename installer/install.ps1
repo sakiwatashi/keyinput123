@@ -157,6 +157,24 @@ try {
         $shortcut.Save()
     }
 
+    # 控制台：狀態、功能開關、個人詞庫與按鍵對照。設定原本只能手改 JSON 或
+    # 跑腳本，沒有捷徑的話一般使用者根本找不到入口。
+    $controlPanel = Join-Path $targetModule "control_panel\SmartPriorityControlPanel.ps1"
+    if (Test-Path -LiteralPath $controlPanel) {
+        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+        $shortcutRoot = Join-Path $programs "智慧優先注音"
+        New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
+        $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell1.0\powershell.exe"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut((Join-Path $shortcutRoot "智慧優先注音 控制台.lnk"))
+        $shortcut.TargetPath = $powershell
+        # WinForms 需要 STA；控制台自己會偵測並重啟，這裡直接指定省一次重啟。
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' + $controlPanel + '"'
+        $shortcut.WorkingDirectory = Join-Path $targetModule "control_panel"
+        $shortcut.Description = "檢視狀態、開關功能、管理個人詞庫與查看按鍵對照"
+        $shortcut.Save()
+    }
+
     # A fresh PIME installation bundles New Chewing. This product needs PIME
     # as infrastructure but exposes only Smart Priority Bopomofo. Never remove
     # New Chewing from a PIME installation that existed before this setup.

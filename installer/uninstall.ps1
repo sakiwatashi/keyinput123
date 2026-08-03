@@ -126,9 +126,11 @@ try {
 
     $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
     $shortcutRoot = Join-Path $programs "智慧優先注音"
-    $shortcutPath = Join-Path $shortcutRoot "轉換錯誤回報工具.lnk"
-    if (Test-Path -LiteralPath $shortcutPath) {
-        Remove-Item -LiteralPath $shortcutPath -Force
+    foreach ($name in @("轉換錯誤回報工具.lnk", "智慧優先注音 控制台.lnk")) {
+        $shortcutPath = Join-Path $shortcutRoot $name
+        if (Test-Path -LiteralPath $shortcutPath) {
+            Remove-Item -LiteralPath $shortcutPath -Force
+        }
     }
     if ((Test-Path -LiteralPath $shortcutRoot) -and
         -not (Get-ChildItem -LiteralPath $shortcutRoot -Force)) {

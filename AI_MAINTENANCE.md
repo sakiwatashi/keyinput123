@@ -1,4 +1,4 @@
-# 使用 AI 維護智慧優先注音
+﻿# 使用 AI 維護智慧優先注音
 
 安裝程式本身不是 AI，也不會從網路自動改寫程式；它只會從使用者實際選字中維護
 個人優先字與詞語。若要使用自己的 AI 修改功能，必須提供這份原始碼專案，而不只是
@@ -90,6 +90,7 @@ Rime Essay 與台灣字頻本身只有文字／權重，沒有完整詞語讀音
 ```powershell
 python -m unittest discover -s tests -v
 .\tests\release_consistency_smoke.ps1
+.\tests\control_panel_smoke.ps1
 .\tests\installer_payload_smoke.ps1
 .\tests\installer_resilience_smoke.ps1
 .\tests\candidate_ui_policy_smoke.ps1
