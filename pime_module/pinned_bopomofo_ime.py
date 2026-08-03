@@ -25,6 +25,7 @@ from .bopomofo_core.phrase_store import (
 )
 from .bopomofo_core.phonetic_corrector import PhoneticCorrector
 from .bopomofo_core.pinned_store import PinnedStore
+from .bopomofo_core.request_trace import shared_trace as request_trace
 from .bopomofo_core.session import CandidateSession
 from .bopomofo_core.state import INITIALS, MEDIALS, RIMES, TONES, Event, EventKind
 
@@ -192,6 +193,9 @@ class PinnedBopomofoTextService(TextService):
 
     def handleRequest(self, msg):
         reply = super().handleRequest(msg)
+        # Off unless the user turns it on. Records which callbacks arrive, not
+        # what was typed -- see bopomofo_core/request_trace.py.
+        request_trace.record(msg, reply)
         try:
             self._apply_beacon_mode(reply)
         except Exception:
