@@ -122,6 +122,14 @@ $readJsonObject = {
             $reloadButton.Height = 30
             $reloadButton.Margin = New-Object System.Windows.Forms.Padding(4)
 
+            # 只有學到的詞需要清理；排名鎖定沒有子字串問題。
+            $pruneButton = New-Object System.Windows.Forms.Button
+            $pruneButton.Text = "清理重複片段"
+            $pruneButton.Width = 130
+            $pruneButton.Height = 30
+            $pruneButton.Margin = New-Object System.Windows.Forms.Padding(4)
+            $pruneButton.Visible = -not $valueIsList
+
             $status = New-Object System.Windows.Forms.Label
             $status.AutoSize = $true
             $status.Margin = New-Object System.Windows.Forms.Padding(12, 10, 4, 4)
@@ -130,6 +138,7 @@ $readJsonObject = {
             [void]$bottom.Controls.Add($deleteButton)
             [void]$bottom.Controls.Add($saveButton)
             [void]$bottom.Controls.Add($reloadButton)
+            [void]$bottom.Controls.Add($pruneButton)
             [void]$bottom.Controls.Add($status)
 
             $entries = New-Object System.Collections.Specialized.OrderedDictionary
@@ -191,6 +200,49 @@ $readJsonObject = {
             }.GetNewClosure())
 
             $reloadButton.Add_Click($load)
+
+            # 清理的判斷規則只有一份，寫在 bopomofo_core\phrase_store.py。
+            # 這裡呼叫 PIME 的 Python 執行它，而不是在 PowerShell 裡重寫一遍：
+            # 手抄的規則遲早會和真正生效的那份分岔。
+            $pruneButton.Add_Click({
+                $python = if ($Context.PimeRoot) {
+                    Join-Path $Context.PimeRoot "python\python3\python.exe"
+                } else { $null }
+                $tool = if ($Context.ModuleRoot) {
+                    Join-Path $Context.ModuleRoot "prune_phrases.py"
+                } else { $null }
+                if (-not $python -or -not (Test-Path -LiteralPath $python) -or
+                    -not $tool -or -not (Test-Path -LiteralPath $tool)) {
+                    $status.Text = "找不到 PIME 的 Python 或清理工具"
+                    return
+                }
+                try {
+                    $report = & $python $tool 2>$null | ConvertFrom-Json
+                    if ($report.removable -le 0) {
+                        $status.Text = "沒有可清理的重複片段（共 $($report.before) 筆）"
+                        return
+                    }
+                    $answer = [System.Windows.Forms.MessageBox]::Show(
+                        ("目前 $($report.before) 筆，其中 $($report.removable) 筆的讀音與文字" +
+                         "完整包含在更長的詞裡，打那個較長的讀音仍然叫得出來。`r`n`r`n" +
+                         "清理後剩 $($report.after) 筆。`r`n`r`n" +
+                         "會先自動備份原檔。要清理嗎？"),
+                        "清理重複片段",
+                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                        [System.Windows.Forms.MessageBoxIcon]::Question)
+                    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                        $status.Text = "已取消，未變更"
+                        return
+                    }
+                    $done = & $python $tool --apply 2>$null | ConvertFrom-Json
+                    & $load
+                    $result = & $Context.RestartPime $Context.LauncherPath
+                    $status.Text = "已清理 $($done.removable) 筆，剩 $($done.after) 筆。$($result.Message)"
+                }
+                catch {
+                    $status.Text = "清理失敗：$($_.Exception.Message)"
+                }
+            }.GetNewClosure())
 
             $saveButton.Add_Click({
                 try {

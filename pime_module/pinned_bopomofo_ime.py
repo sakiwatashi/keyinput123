@@ -1450,8 +1450,26 @@ class PinnedBopomofoTextService(TextService):
             and any(segment.user_corrected for segment in self.segments)
             and all(len(segment.text) == 1 for segment in self.segments)
         ):
+            # Name the runs the user actually fixed. Learning every substring
+            # instead turned one sentence into dozens of word-boundary
+            # fragments; a real store reached 6912 entries that way. The
+            # corrected runs are the parts worth recalling on their own.
+            corrected_spans = []
+            run_start = None
+            for index, segment in enumerate(self.segments):
+                if segment.user_corrected:
+                    if run_start is None:
+                        run_start = index
+                elif run_start is not None:
+                    corrected_spans.append((run_start, index))
+                    run_start = None
+            if run_start is not None:
+                corrected_spans.append((run_start, len(self.segments)))
+
             self.phrase_store.learn(
-                [segment.reading for segment in self.segments], text
+                [segment.reading for segment in self.segments],
+                text,
+                extra_spans=corrected_spans,
             )
         self.setCommitString(text + suffix)
         self._clear_all()

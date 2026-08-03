@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,9 +15,14 @@ class PhraseStoreTests(unittest.TestCase):
 
             loaded = PhraseStore(path)
             self.assertEqual((3, "寫程式"), loaded.best_suffix(readings))
-            self.assertEqual((2, "程式"), loaded.best_suffix(readings[1:]))
             self.assertEqual("寫程式", loaded.exact(readings))
             self.assertEqual("", loaded.exact(readings[:1]))
+            # 「程式」不再被順手學走。這條刻意改掉：舊行為把每個子字串都學
+            # 起來，一句十二字的話就產生約 66 筆，使用者的詞庫因此長到 6912
+            # 筆、477 KB，其中大半是跨詞邊界的碎片。像「程式」這種常用詞本來
+            # 就在內建詞庫裡，不需要個人學習提供。真正需要單獨記住的部分，
+            # 由呼叫端以 extra_spans 明確指定。
+            self.assertEqual((0, ""), loaded.best_suffix(readings[1:]))
 
     def test_longest_matching_suffix_wins(self) -> None:
         store = PhraseStore()
@@ -54,3 +60,75 @@ class PhraseStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LearnScopeTest(unittest.TestCase):
+    """learn() must not manufacture every substring of a sentence.
+
+    The old behaviour learned width 2..12 at every position, so one
+    twelve-character sentence produced about 66 entries. A real store reached
+    6912 entries and 477 KB, roughly half of it fragments straddling word
+    boundaries that nobody would type on purpose.
+    """
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = os.path.join(self.directory.name, "phrases.json")
+
+    def test_learns_only_the_whole_span_by_default(self) -> None:
+        store = PhraseStore(self.path)
+        store.learn(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ", "ㄅㄤˋ"], "我們好棒")
+        self.assertEqual(1, len(store._entries))
+        self.assertEqual("我們好棒", store.exact(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ", "ㄅㄤˋ"]))
+        # A fragment across the word boundary must not have been invented.
+        self.assertEqual("", store.exact(["ㄇㄣ˙", "ㄏㄠˇ"]))
+
+    def test_named_spans_are_learned_as_well(self) -> None:
+        """The part the user hand-corrected has to work on its own later."""
+        store = PhraseStore(self.path)
+        store.learn(
+            ["ㄨㄛˇ", "ㄇㄛˊ", "ㄨˋ", "ㄌㄧㄝˋ", "ㄖㄣˊ"],
+            "我魔物獵人",
+            extra_spans=[(1, 5)],
+        )
+        self.assertEqual("魔物獵人", store.exact(["ㄇㄛˊ", "ㄨˋ", "ㄌㄧㄝˋ", "ㄖㄣˊ"]))
+        self.assertEqual(2, len(store._entries))
+
+    def test_a_twelve_character_sentence_stays_one_entry(self) -> None:
+        readings = [f"ㄗ{index}" for index in range(12)]
+        store = PhraseStore(self.path)
+        store.learn(readings, "一二三四五六七八九十百千")
+        self.assertEqual(1, len(store._entries), "又在製造子字串了")
+
+
+class PruneRedundantTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = os.path.join(self.directory.name, "phrases.json")
+
+    def test_removes_entries_contained_in_a_longer_one(self) -> None:
+        store = PhraseStore(self.path)
+        store.learn(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], "我們好")
+        store.learn(["ㄇㄣ˙", "ㄏㄠˇ"], "們好")
+        self.assertEqual(2, len(store._entries))
+        removed = store.prune_redundant()
+        self.assertEqual(1, removed)
+        self.assertEqual("我們好", store.exact(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"]))
+        self.assertEqual("", store.exact(["ㄇㄣ˙", "ㄏㄠˇ"]))
+
+    def test_keeps_a_short_entry_that_is_not_contained(self) -> None:
+        store = PhraseStore(self.path)
+        store.learn(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], "我們好")
+        store.learn(["ㄉㄧㄢˋ", "ㄏㄨㄚˋ"], "電話")
+        self.assertEqual(0, store.prune_redundant())
+        self.assertEqual("電話", store.exact(["ㄉㄧㄢˋ", "ㄏㄨㄚˋ"]))
+
+    def test_same_readings_but_different_text_is_kept(self) -> None:
+        """Only an aligned match is redundant; a different choice is not."""
+        store = PhraseStore(self.path)
+        store.learn(["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], "我們好")
+        store.learn(["ㄇㄣ˙", "ㄏㄠˇ"], "門號")
+        self.assertEqual(0, store.prune_redundant())
+        self.assertEqual("門號", store.exact(["ㄇㄣ˙", "ㄏㄠˇ"]))
+
