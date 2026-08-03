@@ -74,12 +74,15 @@ $hiddenFileName = "hidden-characters.json"
         $label.AutoSize = $true
         $label.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
 
-        $input = New-Object System.Windows.Forms.TextBox
+        # 不可以叫 $input：那是 PowerShell 的自動變數（管線輸入列舉器），
+        # 在事件處理程序這種 scriptblock 裡會蓋掉同名的區域變數，$input.Text
+        # 於是變成 null。空白時按「列出這些字」就是這樣跳出例外的。
+        $inputBox = New-Object System.Windows.Forms.TextBox
         # 這個框就是要輸入中文字的。WinForms 預設 Inherit，而承接到的狀態
         # 不一定開著輸入法，使用者會發現只打得出英文。明確要求開啟。
-        $input.ImeMode = [System.Windows.Forms.ImeMode]::On
-        $input.Width = 320
-        $input.Margin = New-Object System.Windows.Forms.Padding(4, 4, 8, 4)
+        $inputBox.ImeMode = [System.Windows.Forms.ImeMode]::On
+        $inputBox.Width = 320
+        $inputBox.Margin = New-Object System.Windows.Forms.Padding(4, 4, 8, 4)
 
         $addButton = New-Object System.Windows.Forms.Button
         $addButton.Text = "列出這些字"
@@ -94,7 +97,7 @@ $hiddenFileName = "hidden-characters.json"
         $showHiddenButton.Margin = New-Object System.Windows.Forms.Padding(4)
 
         [void]$top.Controls.Add($label)
-        [void]$top.Controls.Add($input)
+        [void]$top.Controls.Add($inputBox)
         [void]$top.Controls.Add($addButton)
         [void]$top.Controls.Add($showHiddenButton)
 
@@ -205,7 +208,7 @@ $hiddenFileName = "hidden-characters.json"
         $addButton.Add_Click({
             $seen = New-Object System.Collections.Generic.HashSet[string]
             $characters = @()
-            foreach ($character in $input.Text.ToCharArray()) {
+            foreach ($character in $inputBox.Text.ToCharArray()) {
                 $text = [string]$character
                 # 空白、標點與注音都不是候選字，略過。
                 if ([char]::IsWhiteSpace($character)) { continue }

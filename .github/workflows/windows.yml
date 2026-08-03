@@ -46,6 +46,9 @@ jobs:
       - name: Test PIME restart reports failure honestly
         shell: powershell
         run: .\tests\restart_pime_smoke.ps1
+      - name: Test every control panel button is clickable without error
+        shell: powershell
+        run: .\tests\control_panel_buttons_smoke.ps1
       - name: Test control panel shell, modules and keymap parity
         shell: powershell
         run: .\tests\control_panel_smoke.ps1
