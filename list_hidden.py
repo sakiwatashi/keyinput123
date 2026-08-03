@@ -53,10 +53,21 @@ def main() -> int:
     # Closest to the threshold first: those are the ones worth a second look.
     hidden.sort(key=lambda entry: -entry["score"])
 
+    # protected_scores lets the panel recompute every count for any threshold
+    # without asking again. It used to re-run this script on each spinner
+    # change, and each run pays Python startup plus a 2 MB index read, so
+    # clicking from 0 to 7 froze the window for seconds and looked broken.
+    protected_scores = sorted(
+        frequency.score(character)
+        for character in below
+        if not store.is_hidden(character, floor=floor)
+    )
+
     print(json.dumps({
         "floor": floor,
         "hidden": hidden,
         "protected": len(below) - len(hidden),
+        "protected_scores": protected_scores,
         "below": len(below),
     }, ensure_ascii=False))
     return 0

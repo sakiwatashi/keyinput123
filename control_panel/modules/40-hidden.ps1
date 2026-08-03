@@ -89,6 +89,23 @@ $suggestedThreshold = 7
             if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
         } else { $null }
 
+        # 一次取得「不受保護的字 + 分數」。之後改門檻只是在這份集合上篩，
+        # 不再重跑 Python。用一個高門檻叫出全部，因為「是否受保護」與門檻無關。
+        # 一般區域變數，不用 $script:。GetNewClosure 捕捉的是「呼叫它時那一層」
+        # 的變數，$script: 指的是模組檔的腳本作用域，閉包裡拿到的會是 $null——
+        # 這個陷阱在這個控制台已經咬過三次。
+        $hidable = $null
+        $protectedScores = @()
+        if ($python -and $lister) {
+            try {
+                # 高門檻＝叫出全部，因為「是否受保護」與門檻無關。
+                $everything = & $python $lister 100000 2>$null | ConvertFrom-Json
+                $hidable = @($everything.hidden)
+                $protectedScores = @($everything.protected_scores)
+            }
+            catch { $hidable = $null }
+        }
+
         $settings = & $readSettings
         $keepSet = $settings.Keep
         $hiddenSet = $settings.Hidden
@@ -205,18 +222,22 @@ $suggestedThreshold = 7
                 return
             }
 
-            # 真正會被隱藏的那份清單，由輸入法自己的規則算出來（list_hidden.py
-            # 呼叫 bopomofo_core\hidden_characters.py）。單純列出「低於門檻」
-            # 是錯的：出現在內建詞庫的字與語氣詞都會被保護下來，門檻 7 的差別
-            # 是 1482 筆與 269 筆。規則只有一份，面板不重抄。
-            $report = $null
-            if ($python -and $lister) {
-                try { $report = & $python $lister $cut 2>$null | ConvertFrom-Json } catch { }
-            }
-            if ($null -eq $report) {
+            if ($null -eq $hidable) {
                 $summary.Text = "算不出實際會隱藏哪些字"
                 $hint.Text = "找不到 PIME 的 Python 或 list_hidden.py，無法預覽。門檻仍然會生效。"
                 return
+            }
+
+            # 名單在開頁時取一次，這裡只是依門檻篩。先前每次數字變動都重跑一次
+            # Python（啟動加讀 2 MB 索引），從 0 按到 7 就是七次，UI 整個卡住，
+            # 看起來就像按鈕壞掉。判斷規則仍然只有 Python 那一份：這裡篩的是
+            # 它算出來、已經排除掉受保護字的集合，所以套任何門檻都仍然正確。
+            $matching = @($hidable | Where-Object { $_.score -lt $cut })
+            $protectedBelow = @($protectedScores | Where-Object { $_ -lt $cut }).Count
+            $report = [pscustomobject]@{
+                hidden    = $matching
+                protected = $protectedBelow
+                below     = $matching.Count + $protectedBelow
             }
 
             foreach ($entry in $report.hidden) {
