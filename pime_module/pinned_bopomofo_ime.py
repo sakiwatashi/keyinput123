@@ -321,7 +321,11 @@ class PinnedBopomofoTextService(TextService):
         self.last_key_down_time = 0.0
 
     def filterKeyDown(self, keyEvent):
-        if self.pending_shift_toggle:
+        # Never catch up on a Shift press. That press is about to arm a release
+        # of its own, so consuming here made a single tap toggle twice and land
+        # back where it started. Measured: with a release still outstanding, one
+        # tap produced no visible change at all.
+        if self.pending_shift_toggle and not self._is_shift_key(keyEvent.keyCode):
             # onKeyUp never arrived. Measured inside an AnyDesk session: one
             # Shift release produces two filterKeyUp calls and no onKeyUp at
             # all, so the toggle -- which lives in onKeyUp because that is
@@ -335,7 +339,18 @@ class PinnedBopomofoTextService(TextService):
             self.pending_shift_toggle = False
             self.english_mode = not self.english_mode
         self.last_key_event = keyEvent
-        if self.last_key_down_time == 0.0:
+        # A Shift press always restamps the clock, because that clock exists to
+        # time this very press. Only the first key of a chord stamps it
+        # otherwise, so that holding Shift and typing a letter still measures
+        # the Shift.
+        #
+        # The old rule stamped only when the clock was zero, and the clock is
+        # zeroed in filterKeyUp. A key whose release never arrives therefore
+        # froze it: UAC's secure desktop takes the whole desktop away mid-press
+        # without ever sending onDeactivate, so the release is simply lost and
+        # the stale timestamp then failed the 0.5s test for the next real Shift
+        # tap -- the user pressed Shift, nothing happened, and it looked broken.
+        if self._is_shift_key(keyEvent.keyCode) or self.last_key_down_time == 0.0:
             self.last_key_down_time = time.time()
         if keyEvent.isKeyDown(VK_MENU):
             return False

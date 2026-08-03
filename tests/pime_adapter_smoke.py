@@ -1986,6 +1986,48 @@ def main() -> None:
         tail_sequence = type_readings(tail_service, ["ㄉㄚˋ"], tail_sequence + 2)
         assert tail_service.compositionString == "我們好大", tail_service.compositionString
 
+        # UAC's secure desktop takes the whole desktop away mid-keystroke and
+        # never sends onDeactivate, so a key pressed at that moment simply has
+        # no release. The user hit this repeatedly: "it happens when the blue
+        # confirmation window appears while I am typing."
+        #
+        # Two separate faults ate a Shift tap afterwards:
+        #   1. last_key_down_time was stamped only when zero, and only a release
+        #      zeroes it -- so a lost release froze the clock and the next real
+        #      tap failed the 0.5s test.
+        #   2. filterKeyDown's catch-up consumed a pending release on a Shift
+        #      press, whose own release then armed another: one tap, two
+        #      toggles, no visible change.
+        for label, interrupt in (
+            ("Shift pressed as UAC appears", lambda service, seq:
+                filter_key(service, "filterKeyDown", 0x10, seq, shift=True)),
+            ("a letter pressed as UAC appears", lambda service, seq:
+                filter_key(service, "filterKeyDown", 0x41, seq)),
+            ("release seen but onKeyUp lost", lambda service, seq: (
+                filter_key(service, "filterKeyDown", 0x10, seq, shift=True),
+                filter_key(service, "filterKeyUp", 0x10, seq + 1))),
+        ):
+            uac_service = PinnedBopomofoTextService(DummyClient())
+            uac_service.handleRequest(
+                {"method": "onActivate", "seqNum": 2800, "isKeyboardOpen": True}
+            )
+            interrupt(uac_service, 2801)
+            # The user answers the prompt and comes back seconds later. Wind the
+            # clock back rather than sleeping: without this the stale timestamp
+            # is milliseconds old, still inside the 0.5s window, and the very
+            # fault being tested cannot show up. The first version of this test
+            # passed with the fix removed for exactly that reason.
+            if uac_service.last_key_down_time:
+                uac_service.last_key_down_time -= 5.0
+            # The desktop comes back with no onDeactivate and no release.
+            assert uac_service.english_mode is False, label
+
+            tap_shift(uac_service, 2810)
+            assert uac_service.english_mode is True, (
+                label, "第一次 Shift 被吃掉了")
+            tap_shift(uac_service, 2820)
+            assert uac_service.english_mode is False, (label, "第二次沒切回來")
+
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
 
