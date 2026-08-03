@@ -34,7 +34,7 @@ foreach ($file in Get-ChildItem -LiteralPath $moduleDirectory -Filter *.ps1 -Fil
     Assert-True ($null -ne $definition.Order) "模組缺少 Order：$($file.Name)"
     $modules += [pscustomobject]@{ File = $file.Name; Definition = $definition }
 }
-Assert-True ($modules.Count -ge 3) "預期至少三個模組，實際 $($modules.Count) 個"
+Assert-True ($modules.Count -ge 4) "預期至少四個模組，實際 $($modules.Count) 個"
 
 # --- 3. 按鍵表與 Python 原始碼一致 --------------------------------------
 # 用 ast 解析而非 import：pime_module 需要 PIME 的執行環境才載入得起來。
@@ -166,7 +166,7 @@ $broken = Join-Path $moduleDirectory "99-broken-smoke-fixture.ps1"
 try {
     Set-Content -LiteralPath $broken -Encoding UTF8 -Value 'throw "測試用的故意失敗"'
     $output = & $shell -NoShow 2>&1 | Out-String
-    Assert-True ($output -match "modules=4") "壞掉的模組應仍被列出並以錯誤分頁呈現，實際輸出：$output"
+    Assert-True ($output -match "modules=5") "壞掉的模組應仍被列出並以錯誤分頁呈現，實際輸出：$output"
     Assert-True ($output -match "buildFailures=0") "只有載入失敗的模組不該再產生建構失敗：$output"
     Assert-True ($output -match "載入失敗") "壞掉的模組沒有被標示為載入失敗：$output"
     foreach ($name in @("狀態", "個人詞庫", "按鍵對照")) {
@@ -179,7 +179,7 @@ finally {
 
 # --- 5. 正常情況 ---------------------------------------------------------
 $output = & $shell -NoShow 2>&1 | Out-String
-Assert-True ($output -match "modules=3") "預期載入三個模組：$output"
+Assert-True ($output -match "modules=4") "預期載入三個模組：$output"
 Assert-True ($output -notmatch "載入失敗") "正常情況不該有模組載入失敗：$output"
 # 建構失敗的分頁標題是正常的，只有內容變成錯誤訊息，所以必須另外檢查 ——
 # 少了這一項，20-lexicon 在閉包裡呼叫不到輔助函式的 bug 就矇混過關了。
@@ -189,4 +189,4 @@ if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Output "FAIL: $failure" }
     throw "control_panel_smoke 有 $($failures.Count) 項失敗。"
 }
-Write-Output "PASS: 控制台外殼、三個模組、按鍵表與 Python 原始碼一致、壞模組隔離"
+Write-Output "PASS: 控制台外殼、四個模組、按鍵表與 Python 原始碼一致、壞模組隔離"

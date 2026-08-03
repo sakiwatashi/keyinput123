@@ -12,6 +12,7 @@ from .frequency_lexicon import FrequencyLexicon
 from .keymap import keys_for_reading
 from .reading_phrase_lexicon import ReadingPhraseLexicon
 from .taiwan_frequency import TaiwanFrequency
+from .hidden_characters import shared_hidden_characters as HIDDEN_CHARACTERS
 
 
 SIMPLE_CONVERSION_ENGINE = 0
@@ -197,6 +198,10 @@ class LibChewingProvider:
         # pronunciation cannot promote 員 over 運 for ㄩㄣˋ, then use Taiwan
         # frequency to organize the remaining candidates.
         results = TAIWAN_FREQUENCY.rank_characters(results, preserve_first=True)
+        # Applied after ranking and before the literal Zhuyin is added, so a
+        # hidden character cannot occupy a slot and the raw Zhuyin escape
+        # always survives.
+        results = HIDDEN_CHARACTERS.filter(results)
         results = prioritize_common_character(reading, results)
         return add_literal_bopomofo_candidate(reading, results)[:MAX_CANDIDATES]
 

@@ -42,6 +42,14 @@ class TaiwanFrequency:
             self._characters = {}
             self._buckets = {}
 
+    def score(self, character: str) -> int:
+        """This character's Taiwan frequency, 0 when the table does not list it.
+
+        Absent and genuinely-zero are deliberately the same answer: callers
+        that use this as a floor want both treated as "not common".
+        """
+        return self._characters.get(character, 0)
+
     def rank_characters(
         self, candidates: list[str], *, preserve_first: bool = False
     ) -> list[str]:
