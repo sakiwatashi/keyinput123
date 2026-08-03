@@ -45,7 +45,15 @@ const wchar_t kInstanceMutex[] = L"Local\\SmartPriorityBopomofo.CandidateUI";
 const UINT_PTR kPollTimerId = 1;
 const UINT_PTR kTopmostTimerId = 2;
 // Shell_NotifyIcon delivers its events through an application-defined message.
-const UINT kTrayCallbackMessage = WM_APP + 2;  // +1 是 WM_CANDIDATE_UPDATE
+const UINT kTrayCallbackMessage = WM_APP + 2;
+
+// WM_APP + 1 is PipeServer's WM_CANDIDATE_UPDATE, hence + 2 above.
+
+// A registered message has no value until run time, so the window procedure
+// has to compare against it rather than use it as a case label.
+UINT SmartPriority_TaskbarCreated() {
+    return TrayIcon::taskbarCreatedMessage();
+}
 
 // Measured: a beacon that re-asserts HWND_TOPMOST on its own schedule can sit
 // above us between our syncs, because a re-assert that changes neither position
@@ -395,6 +403,13 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         ::PostQuitMessage(0);
         return 0;
     default:
+        // Explorer restarting wipes every notification icon and then
+        // broadcasts this. Without re-adding, the icon is gone until the
+        // helper itself restarts -- measured after a round of installs.
+        // Registered messages have no compile-time value, so this cannot be a
+        // case label.
+        if (msg == SmartPriority_TaskbarCreated())
+            g_state.tray.reAdd();
         break;
     }
     return ::DefWindowProcW(hwnd, msg, wp, lp);

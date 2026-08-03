@@ -15,7 +15,7 @@ const wchar_t* kPowerShellArgs =
 
 }  // namespace
 
-TrayIcon::TrayIcon(): data_{}, added_(false), callbackMessage_(0) {
+TrayIcon::TrayIcon(): data_{}, added_(false), owner_(nullptr), callbackMessage_(0) {
 }
 
 TrayIcon::~TrayIcon() {
@@ -27,6 +27,8 @@ bool TrayIcon::add(HWND owner, UINT callbackMessage, const std::wstring& tooltip
         return true;
 
     callbackMessage_ = callbackMessage;
+    owner_ = owner;
+    tooltip_ = tooltip;
     data_ = {};
     data_.cbSize = sizeof(data_);
     data_.hWnd = owner;
@@ -55,6 +57,19 @@ void TrayIcon::remove() {
         return;
     ::Shell_NotifyIconW(NIM_DELETE, &data_);
     added_ = false;
+}
+
+UINT TrayIcon::taskbarCreatedMessage() {
+    // Registered once per process; the value is stable for the session.
+    static const UINT message = ::RegisterWindowMessageW(L"TaskbarCreated");
+    return message;
+}
+
+void TrayIcon::reAdd() {
+    // Explorer has thrown the old icon away, so forget it and register again.
+    added_ = false;
+    if (owner_ != nullptr)
+        add(owner_, callbackMessage_, tooltip_);
 }
 
 bool TrayIcon::handleMessage(HWND owner, WPARAM wp, LPARAM lp) {

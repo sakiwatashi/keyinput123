@@ -33,6 +33,13 @@ public:
     // Handles the callback message. Returns true when the message was ours.
     bool handleMessage(HWND owner, WPARAM wp, LPARAM lp);
 
+    // Explorer clears every notification icon when it restarts and then
+    // broadcasts TaskbarCreated. An icon that is not re-added is gone for the
+    // rest of the session, which is exactly how ours vanished after a round of
+    // installs. Returns the message to watch for.
+    static UINT taskbarCreatedMessage();
+    void reAdd();
+
     // What a double-click or the menu's first item runs.
     void setControlPanelPath(const std::wstring& path) { controlPanelPath_ = path; }
 
@@ -42,6 +49,8 @@ private:
 
     NOTIFYICONDATAW data_;
     bool added_;
+    HWND owner_;
+    std::wstring tooltip_;
     UINT callbackMessage_;
     std::wstring controlPanelPath_;
 };
