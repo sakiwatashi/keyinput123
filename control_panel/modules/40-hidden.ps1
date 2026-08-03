@@ -17,6 +17,10 @@ $hiddenFileName = "hidden-characters.json"
 # 孳 6 分而 珮 7 分。所以門檻只是快速的第一刀，勾選才是判準。
 $suggestedThreshold = 7
 
+# 可隱藏的字共 294 個，門檻 20 已涵蓋 289 個。更高只會開始砍到詞庫漏掉的
+# 常用字，所以數字鈕就到這裡為止。
+$maximumThreshold = 20
+
 @{
     Name  = "候選字過濾"
     Order = 40
@@ -132,7 +136,11 @@ $suggestedThreshold = 7
 
         $threshold = New-Object System.Windows.Forms.NumericUpDown
         $threshold.Minimum = 0
-        $threshold.Maximum = 10000
+        # 上限 20 是量出來的，不是隨手取的。可隱藏的字總共 294 個，門檻 20 就
+        # 拿到 289 個；再往上幾乎沒有收穫，卻開始碰到詞庫沒保護到的常用字——
+        # 秘(122)、濕(62)、抬(32)、兇(26)、雇(24) 都在可隱藏集合裡，只是分數高
+        # 才碰不到。沒有上限的數字鈕等於把那個地雷留給使用者踩。
+        $threshold.Maximum = $maximumThreshold
         $threshold.Width = 70
         $threshold.Value = $settings.Floor
         $threshold.Margin = New-Object System.Windows.Forms.Padding(2, 5, 2, 4)
@@ -248,12 +256,14 @@ $suggestedThreshold = 7
                         [System.Drawing.Color]::FromArgb(0, 120, 60)
                 }
             }
-            $summary.Text = ("會隱藏 $($report.hidden.Count) 個字" +
-                             "（低於門檻的有 $($report.below) 個，其中 $($report.protected) 個因為出現在內建詞庫而保留）")
+            $total = if ($hidable) { $hidable.Count } else { 0 }
+            $summary.Text = ("會隱藏 $($report.hidden.Count) 個字（可隱藏的總共 $total 個）" +
+                             "　低於門檻的有 $($report.below) 個，其中 $($report.protected) 個因為出現在內建詞庫而保留")
             $hint.Text = ("由上而下是最接近門檻的字，最需要看一眼；想留下的勾「保留」。`r`n" +
                           "字頻表是 1996 年的書面語調查，看不到口語和成語用字——嗯 只有 7 分、囫 圇 釜 都是 0 分。" +
                           "所以規則不是單純比分數：**出現在內建詞庫的字、以及語氣詞，一律保留**，門檻只處理剩下的。`r`n" +
-                          "這個保護讓可隱藏的字收斂在 270 個左右，不論門檻設多高——那才是真正的冷僻字。" +
+                          "門檻拉高的收穫遞減得很快：7 分已經拿到 269 個，20 分是 289 個，全部也才 294 個。" +
+                          "所以數字鈕停在 20——再往上碰得到的是詞庫漏保護的常用字（秘、濕、抬、兇、雇），不是冷僻字。" +
                           "它仍然不完美（孳、恣 因為出現在孳生、恣意而被保留；祐 不在詞庫裡而會被隱藏），所以勾選才是最終判準。" +
                           "這裡只是隱藏，內建字典沒有被改。")
         }.GetNewClosure()
