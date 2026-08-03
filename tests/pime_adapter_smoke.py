@@ -1936,6 +1936,56 @@ def main() -> None:
         filter_key(normal_service, "filterKeyDown", 0x41, 2525)
         assert normal_service.english_mode is True, "the catch-up toggled a second time"
 
+        # Typing follows the caret. Moving left and typing without deleting
+        # first used to append instead of insert: 我們好 with the caret at
+        # 我們|好 became 我們好大. Only Backspace's explicit gap was honoured,
+        # and the reading in progress was drawn at the far right as well, so
+        # the character appeared to jump before it was even finished.
+        for label, lefts, expected in (
+            ("caret before the last segment", 1, "我們大好"),
+            ("caret in the middle", 2, "我大們好"),
+            ("caret before everything", 3, "大我們好"),
+        ):
+            caret_service = PinnedBopomofoTextService(DummyClient())
+            caret_service.phrase_store = PhraseStore(
+                os.path.join(appdata, "caret-phrases.json")
+            )
+            caret_sequence = type_readings(
+                caret_service, ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], 2600
+            )
+            assert caret_service.compositionString == "我們好", caret_service.compositionString
+            for _ in range(lefts):
+                special_key(caret_service, 0x25, caret_sequence)  # VK_LEFT
+                caret_sequence += 1
+
+            # The reading in progress must already be drawn at the caret.
+            press(caret_service, keys_for_reading("ㄉㄚˋ")[0], caret_sequence)
+            caret_sequence += 1
+            drawn = caret_service.compositionString
+            assert "ㄉ" in drawn, (label, drawn)
+            assert not drawn.endswith("ㄉ"), (label, drawn, "drawn at the end, not the caret")
+
+            for character in keys_for_reading("ㄉㄚˋ")[1:]:
+                press(caret_service, character, caret_sequence)
+                caret_sequence += 1
+            assert caret_service.compositionString == expected, (
+                label,
+                caret_service.compositionString,
+                expected,
+            )
+
+        # Moving back to the end must still append, and Backspace's own gap
+        # must keep working -- that path was already correct.
+        tail_service = PinnedBopomofoTextService(DummyClient())
+        tail_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "caret-tail-phrases.json")
+        )
+        tail_sequence = type_readings(tail_service, ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], 2700)
+        special_key(tail_service, 0x25, tail_sequence)      # VK_LEFT
+        special_key(tail_service, 0x27, tail_sequence + 1)  # VK_RIGHT
+        tail_sequence = type_readings(tail_service, ["ㄉㄚˋ"], tail_sequence + 2)
+        assert tail_service.compositionString == "我們好大", tail_service.compositionString
+
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
 

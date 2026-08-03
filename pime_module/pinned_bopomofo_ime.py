@@ -566,10 +566,12 @@ class PinnedBopomofoTextService(TextService):
             if symbol in TONES and not self.session.preedit:
                 self._emit_or_buffer_literal(symbol)
                 return True
-            # Ordinary typing continues at the end unless Backspace left an
-            # explicit insertion gap inside the composition.
-            if not self.session.preedit and self.replacement_index is None:
-                self.focus_index = len(self.segments) - 1 if self.segments else None
+            # Typing follows the caret. This used to force the caret back to
+            # the end unless Backspace had left an explicit gap, so moving left
+            # and typing without deleting appended instead of inserting:
+            # 我們|好 became 我們好大. focus_index already tracks the caret
+            # after arrow keys, candidate selection and each insertion, so
+            # there is nothing here to correct.
             event = self.session.input_symbol(symbol)
             self.reading_open = False
             self._handle_session_event(event)
@@ -1287,11 +1289,18 @@ class PinnedBopomofoTextService(TextService):
             locked=advance_focus,
             user_corrected=advance_focus,
         )
-        insertion = (
-            self.replacement_index
-            if self.replacement_index is not None
-            else len(self.segments)
-        )
+        # The caret has to decide where this goes. Only Backspace used to be
+        # honoured here, so moving left and typing without deleting appended to
+        # the end instead: 我們好 with the caret at 我們|好 became 我們好大.
+        # focus_index + 1 is the caret, and it holds -1 when the caret sits
+        # before the first segment, which inserts at the front.
+        # _buffer_literal_text already resolved the position this way.
+        if self.replacement_index is not None:
+            insertion = self.replacement_index
+        elif self.focus_index is not None:
+            insertion = self.focus_index + 1
+        else:
+            insertion = len(self.segments)
         self.segments.insert(insertion, segment)
         self.session.clear()
         self.replacement_index = None
@@ -1365,11 +1374,17 @@ class PinnedBopomofoTextService(TextService):
         segment_texts = [segment.text for segment in self.segments]
 
         active_text = self.session.preedit
-        active_index = (
-            self.replacement_index
-            if self.replacement_index is not None
-            else len(segment_texts)
-        )
+        # Draw the reading in progress where the caret is, not always at the
+        # end. Honouring only Backspace's gap put a half-typed 我們|好ㄉ at the
+        # far right, so the reading appeared to jump before it was even
+        # finished. _accept_active_candidate resolves the final position the
+        # same way, so what is drawn and where it lands agree.
+        if self.replacement_index is not None:
+            active_index = self.replacement_index
+        elif self.focus_index is not None:
+            active_index = self.focus_index + 1
+        else:
+            active_index = len(segment_texts)
 
         if keep_candidates and self.showCandidates:
             candidates, _ = self._candidate_target()
