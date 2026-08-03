@@ -147,19 +147,13 @@
                 [IO.File]::WriteAllText($Context.CandidateUi, $json,
                     (New-Object Text.UTF8Encoding($false)))
 
-                if (-not $Context.LauncherPath -or -not (Test-Path -LiteralPath $Context.LauncherPath)) {
-                    throw "找不到 PIMELauncher.exe，請自行重啟 PIME 讓設定生效。"
-                }
-                Get-Process -Name "PIMELauncher" -ErrorAction SilentlyContinue |
-                    ForEach-Object { $_.CloseMainWindow() | Out-Null; Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-                Start-Sleep -Milliseconds 700
-                Start-Process -FilePath $Context.LauncherPath | Out-Null
-                Start-Sleep -Milliseconds 900
+                $result = & $Context.RestartPime $Context.LauncherPath
                 & $refresh
                 [System.Windows.Forms.MessageBox]::Show(
-                    "已套用並重啟 PIME。", "智慧優先注音",
+                    "設定已寫入。$($result.Message)", "智慧優先注音",
                     [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+                    $(if ($result.Success) { [System.Windows.Forms.MessageBoxIcon]::Information }
+                      else { [System.Windows.Forms.MessageBoxIcon]::Warning })) | Out-Null
             }
             catch {
                 [System.Windows.Forms.MessageBox]::Show(

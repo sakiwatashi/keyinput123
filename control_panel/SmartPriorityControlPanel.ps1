@@ -36,6 +36,10 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# 重啟 PIME 一律走這裡。它會確認行程真的活著，並在失敗時據實回報 ——
+# 先前各模組自己 Stop+Start 又不檢查，害使用者的輸入法整個消失卻顯示成功。
+. (Join-Path $PSScriptRoot "restart_pime.ps1")
+
 $script:UiFont = New-Object System.Drawing.Font("Microsoft JhengHei UI", 9)
 $script:MonoFont = New-Object System.Drawing.Font("Consolas", 9)
 
@@ -84,6 +88,7 @@ function New-SmartPriorityContext {
         CandidateUi   = Join-Path $stateRoot "candidate-ui.json"
         PhrasesPath   = Join-Path $stateRoot "phrases.json"
         PinsPath      = Join-Path $stateRoot "pins.json"
+        RestartPime   = ${function:Restart-Pime}
         UiFont        = $script:UiFont
         MonoFont      = $script:MonoFont
     }

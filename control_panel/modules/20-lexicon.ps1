@@ -209,16 +209,8 @@ $readJsonObject = {
 
                     # 執行中的輸入法把整份詞庫存在記憶體裡，任何一次學習都會用
                     # 記憶體內容覆蓋整個檔案。不重啟 PIME，這次編輯遲早被蓋掉。
-                    if ($Context.LauncherPath -and (Test-Path -LiteralPath $Context.LauncherPath)) {
-                        Get-Process -Name "PIMELauncher" -ErrorAction SilentlyContinue |
-                            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-                        Start-Sleep -Milliseconds 700
-                        Start-Process -FilePath $Context.LauncherPath | Out-Null
-                        $status.Text = "已儲存 $($payload.Count) 筆並重啟 PIME"
-                    }
-                    else {
-                        $status.Text = "已儲存 $($payload.Count) 筆；找不到 PIMELauncher，請自行重啟 PIME"
-                    }
+                    $result = & $Context.RestartPime $Context.LauncherPath
+                    $status.Text = "已儲存 $($payload.Count) 筆。$($result.Message)"
                 }
                 catch {
                     [System.Windows.Forms.MessageBox]::Show(

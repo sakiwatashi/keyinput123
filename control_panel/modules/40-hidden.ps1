@@ -247,16 +247,8 @@ $hiddenFileName = "hidden-characters.json"
                 }
                 & $writeHidden $hidden
 
-                if ($Context.LauncherPath -and (Test-Path -LiteralPath $Context.LauncherPath)) {
-                    Get-Process -Name "PIMELauncher" -ErrorAction SilentlyContinue |
-                        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-                    Start-Sleep -Milliseconds 700
-                    Start-Process -FilePath $Context.LauncherPath | Out-Null
-                    $status.Text = "已儲存，共隱藏 $($hidden.Count) 個字，PIME 已重啟"
-                }
-                else {
-                    $status.Text = "已儲存，共隱藏 $($hidden.Count) 個字；請自行重啟 PIME"
-                }
+                $result = & $Context.RestartPime $Context.LauncherPath
+                $status.Text = "已儲存，共隱藏 $($hidden.Count) 個字。$($result.Message)"
             }
             catch {
                 [System.Windows.Forms.MessageBox]::Show(

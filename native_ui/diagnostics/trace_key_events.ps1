@@ -20,16 +20,14 @@ $switchPath = Join-Path $stateRoot "keyevent-trace.json"
 $logPath = Join-Path $stateRoot "keyevent-trace.log"
 $launcher = Join-Path ${env:ProgramFiles(x86)} "PIME\PIMELauncher.exe"
 
-function Restart-Pime {
-    if (-not (Test-Path -LiteralPath $launcher)) {
-        Write-Output "找不到 PIMELauncher，請自行重啟 PIME。"
-        return
-    }
-    Get-Process -Name PIMELauncher -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 700
-    Start-Process -FilePath $launcher | Out-Null
-    Write-Output "已重啟 PIME。"
+# 共用的重啟工具。它會確認行程真的活著，失敗就明講 —— 這支腳本先前
+# 自己 Stop+Start 又不檢查，害使用者的輸入法整個消失卻顯示「已重啟」。
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path (Join-Path $repoRoot "control_panel") "restart_pime.ps1")
+
+function Restart-PimeAndReport {
+    $result = Restart-Pime -LauncherPath $launcher
+    Write-Output $result.Message
 }
 
 function Write-Switch([bool]$enabled) {
@@ -42,7 +40,7 @@ function Write-Switch([bool]$enabled) {
 
 if ($On) {
     Write-Switch $true
-    Restart-Pime
+    Restart-PimeAndReport
     Write-Output ""
     Write-Output "追蹤已開啟。接著請："
     Write-Output "  1. 連進 AnyDesk，在遠端的 CLI 視窗裡短按 Shift 兩三次"
@@ -56,7 +54,7 @@ if ($On) {
 
 if ($Off) {
     Write-Switch $false
-    Restart-Pime
+    Restart-PimeAndReport
     Write-Output "追蹤已關閉。記錄檔仍保留在 $logPath"
     return
 }
