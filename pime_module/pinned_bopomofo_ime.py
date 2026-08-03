@@ -482,17 +482,24 @@ class PinnedBopomofoTextService(TextService):
                     # Zhuyin is what the user asked for.
                     self._emit_or_buffer_literal(self.session.preedit)
                     return True
-                if len(self.session.candidates) == 1 and self._is_literal_bopomofo(
+                if self.session.candidates and self._is_literal_bopomofo(
                     self.session.candidates[0]
                 ):
-                    # Space supplied the tone and the reading turned out to
-                    # have no Chinese syllable at all, so its only candidate
-                    # is the raw Zhuyin and a menu offers nothing to choose.
-                    # Microsoft Bopomofo emits it on the space itself, which
-                    # is what makes ㄏ+space repeatable at typing speed. The
-                    # one-item menu cost a keystroke and swallowed input: with
-                    # it open, retyping ㄏ only replaced the initial with
-                    # itself, so ㄏ空ㄏ空ㄏ空 produced a single ㄏ.
+                    # Space supplied the tone and the dictionary ranked the raw
+                    # Zhuyin first, which is it saying this reading has no real
+                    # Chinese syllable. Emit it on the space itself, as
+                    # Microsoft Bopomofo does -- that is what makes ㄏ+space
+                    # repeatable at typing speed. A menu here cost a keystroke
+                    # and swallowed input: with it open, retyping ㄏ only
+                    # replaced the initial with itself, so ㄏ空ㄏ空ㄏ空 produced
+                    # a single ㄏ.
+                    #
+                    # Rare Han characters trailing the literal (ㄑ→胠, ㄟ→欸,
+                    # ㄦ→児) do not change this. The menu existed to stop one of
+                    # those winning by accident, and emitting the literal serves
+                    # that better than offering them. They lose their route in
+                    # through this key, which is the accepted cost of ㄏ, ㄑ and
+                    # ㄦ all behaving alike.
                     #
                     # This lives here rather than in _handle_session_event
                     # because a tone the user typed explicitly is a different

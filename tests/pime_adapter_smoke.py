@@ -1513,19 +1513,14 @@ def main() -> None:
                 special_key(literal_service, 0x28, sequence + 2)
                 choices = [choice.text for choice in literal_service.candidate_choices]
                 assert literal in choices[:4], (literal, choices)
-            elif len(candidates) == 1:
-                # No Chinese syllable exists for this reading, so there is
-                # nothing to choose between and the space emits the Zhuyin
-                # itself. That is what lets ㄏ+space be repeated at typing
-                # speed, as in Microsoft Bopomofo.
-                assert reply["commitString"] == literal, (literal, reply)
-                assert not reply["showCandidates"], (literal, reply)
             else:
-                # A literal ranked first with rare Han characters behind it
-                # (ㄑ→胠) still opens the menu: auto-accepting one of those
-                # would be wrong.
-                assert reply["candidateList"][0] == literal, (literal, reply)
-                assert len(reply["candidateList"]) > 1, (literal, reply)
+                # The literal ranked first, so the dictionary has no real
+                # Chinese syllable for this reading and the space emits the
+                # Zhuyin itself -- what lets ㄏ+space repeat at typing speed.
+                # Rare Han characters behind the literal (ㄑ→胠, ㄦ→児) do not
+                # change it: every lone symbol behaves the same way.
+                assert reply.get("commitString") == literal, (literal, reply)
+                assert not reply.get("showCandidates"), (literal, reply)
             sequence += 3
         assert standalone_defaults["ㄧ"][0] == "一"
         assert "阿" in standalone_defaults["ㄚ"]
@@ -1821,16 +1816,16 @@ def main() -> None:
             committed += space_reply["commitString"]
         assert committed == "ㄏㄏㄏ", committed
 
-        # The menu still exists for its actual purpose. libchewing appends rare
-        # Han characters to some lone symbols (ㄑ→胠); auto-accepting one of
-        # those would be wrong, so a literal with company keeps the menu.
+        # A lone symbol trailed by rare Han characters behaves the same as ㄏ.
+        # libchewing offers ㄑ→['ㄑ', '胠']; the literal ranking first is the
+        # dictionary saying there is no real syllable here, so the space emits
+        # the Zhuyin rather than offering 胠. Every lone symbol alike was the
+        # explicit request.
         rare_service = PinnedBopomofoTextService(DummyClient())
         press(rare_service, "f", 2320)
         rare_reply = special_key(rare_service, 0x20, 2321)
-        assert rare_reply.get("showCandidates") is True, rare_reply
-        assert rare_reply.get("candidateList")[0] == "ㄑ", rare_reply
-        assert len(rare_reply.get("candidateList")) > 1, rare_reply
-        assert not rare_reply.get("commitString"), rare_reply
+        assert rare_reply.get("commitString") == "ㄑ", rare_reply
+        assert not rare_reply.get("showCandidates"), rare_reply
 
         # A symbol that is a complete syllable still converts to Hanzi in the
         # editable buffer rather than emitting raw Zhuyin. Which character wins
