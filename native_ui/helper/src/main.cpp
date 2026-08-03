@@ -19,9 +19,11 @@
 #include "CandidateRenderer.h"
 #include "ForegroundPolicy.h"
 #include "PipeServer.h"
+#include "TrayIcon.h"
 
 #include <windows.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <windowsx.h>
 
 #include <string>
@@ -42,6 +44,8 @@ const wchar_t kPipeName[] = L"\\\\.\\pipe\\SmartPriorityBopomofo.CandidateUI";
 const wchar_t kInstanceMutex[] = L"Local\\SmartPriorityBopomofo.CandidateUI";
 const UINT_PTR kPollTimerId = 1;
 const UINT_PTR kTopmostTimerId = 2;
+// Shell_NotifyIcon delivers its events through an application-defined message.
+const UINT kTrayCallbackMessage = WM_APP + 2;  // +1 是 WM_CANDIDATE_UPDATE
 
 // Measured: a beacon that re-asserts HWND_TOPMOST on its own schedule can sit
 // above us between our syncs, because a re-assert that changes neither position
@@ -55,6 +59,7 @@ struct Beacon {
 };
 
 struct AppState {
+    TrayIcon tray;
     HWND hwnd = nullptr;
     HFONT font = nullptr;
     CandidateRenderer renderer;
@@ -381,7 +386,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         rebuildFont(g_state);
         ::InvalidateRect(hwnd, nullptr, TRUE);
         return 0;
+    case kTrayCallbackMessage:
+        if (g_state.tray.handleMessage(hwnd, wp, lp))
+            return 0;
+        break;
     case WM_DESTROY:
+        g_state.tray.remove();
         ::PostQuitMessage(0);
         return 0;
     default:
@@ -489,6 +499,36 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     g_state.renderer.setCandidates(candidates, kSelectionKeys);
     g_state.renderer.setCandPerRow(2);
     g_state.renderer.setSelection(0);
+
+    if (!g_state.demoMode) {
+        // The control panel lives beside this executable, inside the module
+        // directory PIME loads. Deriving the path rather than storing one keeps
+        // it correct wherever the module was installed.
+        // Installed at <module>\helper\, but a development build sits in its
+        // own bin directory. Walk up until control_panel is found rather than
+        // assuming either layout.
+        wchar_t exePath[MAX_PATH] = {0};
+        if (::GetModuleFileNameW(nullptr, exePath, ARRAYSIZE(exePath)) != 0) {
+            ::PathRemoveFileSpecW(exePath);
+            std::wstring directory = exePath;
+            for (int level = 0; level < 4; ++level) {
+                std::wstring panel =
+                    directory + L"\\control_panel\\SmartPriorityControlPanel.ps1";
+                if (::PathFileExistsW(panel.c_str())) {
+                    g_state.tray.setControlPanelPath(panel);
+                    break;
+                }
+                size_t slash = directory.find_last_of(L'\\');
+                if (slash == std::wstring::npos)
+                    break;
+                directory.erase(slash);
+            }
+        }
+        // A desktop that refuses the notification area must not stop the
+        // candidate window from working, so the result is not checked.
+        g_state.tray.add(g_state.hwnd, kTrayCallbackMessage,
+                         L"智慧優先注音 —— 雙擊開啟控制台");
+    }
 
     if (g_state.demoMode) {
         g_state.hasCandidates = true;

@@ -12,6 +12,7 @@ add_executable(SmartPriorityCandidateUI WIN32
     src/CandidateRenderer.cpp
     src/ForegroundPolicy.cpp
     src/PipeServer.cpp
+    src/TrayIcon.cpp
 )
 
 target_compile_definitions(SmartPriorityCandidateUI PRIVATE
@@ -27,4 +28,4 @@ if(MSVC)
     target_compile_options(SmartPriorityCandidateUI PRIVATE /utf-8)
 endif()
 
-target_link_libraries(SmartPriorityCandidateUI PRIVATE user32 gdi32 shell32)
+target_link_libraries(SmartPriorityCandidateUI PRIVATE user32 gdi32 shell32 shlwapi)
