@@ -40,6 +40,9 @@ jobs:
       - name: Test licence encoding and version consistency
         shell: powershell
         run: .\tests\release_consistency_smoke.ps1
+      - name: Test no JSON file carries a UTF-8 BOM
+        shell: powershell
+        run: .\tests\json_encoding_smoke.ps1
       - name: Test PIME restart reports failure honestly
         shell: powershell
         run: .\tests\restart_pime_smoke.ps1
