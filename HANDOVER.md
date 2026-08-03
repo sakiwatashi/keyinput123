@@ -6,7 +6,7 @@
 ## 1. 專案現況
 
 - 正式位置：https://github.com/sakiwatashi/keyinput123
-- 最新版本：**v0.6.8**，安裝檔由 CI 自動建置發布
+- 最新版本：**v0.6.9**，安裝檔由 CI 自動建置發布（推 tag 才會產生）
 - 舊 repo `sakiwatashi/inputmethod` 已封存唯讀，release 與 tag 皆已刪除，
   README 有搬遷公告。**不要再往那裡推東西。**
 - 版控乾淨，本機與遠端同步。**注意本機 git 結構**：開發在外層 repo 的工作
@@ -146,6 +146,7 @@ PIME 的 python 伺服器也從未啟動** —— 表示沒有任何應用程式
 ```powershell
 python -m unittest discover -s tests -v
 .\tests\release_consistency_smoke.ps1
+.\tests\control_panel_smoke.ps1
 .\tests\installer_payload_smoke.ps1
 .\tests\installer_resilience_smoke.ps1
 .\tests\candidate_ui_policy_smoke.ps1
@@ -342,3 +343,38 @@ filterKeyUp     Shift   passed
 可信的判準都是**在真正的執行環境裡量到的東西**：`LibImeWindow` 有沒有出現、
 `onKeyUp` 有沒有被呼叫、已安裝的那份檔案裡有沒有那行程式碼。
 **改任何東西之前，先確認你量的是不是使用者實際在跑的那一份。**
+
+## 15. 新增（2026-08-03）：候選字過濾
+
+使用者要移除冷僻字。兩個量測決定了設計：
+
+1. **字頻分不出來。** `恣`=5 而 `祐`=1，`孳`=6 而 `珮`=7，`昕`／`彤`=0 卻和
+   `眥`／`剚` 同級。沒有任何門檻能把「冷僻沒用」和「冷僻但想要」分開。
+2. **純手勾是打地鼠。** 把 `ㄗˋ` 的 `孳 恣 磧 眥 剚 胔` 藏起來之後，
+   `胾 扻 倳 牸 芓 絘` 立刻從同一讀音的後段遞補上來。
+
+所以兩種手段並用，優先序：`always_show` > `hidden` > `minimum_frequency`
+（0 為關閉）。門檻負責大量的部分，也涵蓋不在字頻表裡的字；名單是對門檻的
+修正。實作在 `bopomofo_core/hidden_characters.py`，接在
+`libchewing_provider.py` 排序之後、加入注音候選之前。
+
+**是隱藏不是刪除。** 內建字典是 libchewing 的第三方資料，完全沒動。使用者
+明確要求「刪掉」，但同一個效果有兩種存法，其中一種可以反悔 —— 這點有向
+使用者說明並取得同意。若某讀音的候選被全部隱藏會保留原清單，以免打不出那個音。
+
+UI 是控制台第四個分頁 `40-hidden.ps1`。門檻預設 0，避免開啟面板隨手儲存
+就意外套用。
+
+## 16. 新增（2026-08-03）：打字跟著游標走
+
+回報：一行字裡按 `←` 往回再輸入，新字跳到最右邊。
+
+原本是刻意設計 —— 註解寫著「打字一律接到尾端，除非 Backspace 挖了洞」。
+所以先按 Backspace 的路徑正確，單純移動游標的路徑不然。這條規則和任何文字
+編輯器的直覺相反。
+
+同一個遺漏在三處，都只認 `replacement_index` 而不看游標：輸入注音時把
+`focus_index` 拉回尾端、`_render_buffer` 把進行中的注音畫在尾端（`我們|好`
+打 `ㄉ` 顯示成 `我們好ㄉ`，字沒打完就看起來跳走）、`_accept_active_candidate`
+把完成的音節插在尾端。三處統一改為 `replacement_index` → `focus_index + 1`
+→ 尾端。
