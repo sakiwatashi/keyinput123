@@ -1,12 +1,21 @@
 ﻿# 分頁：候選字過濾
 #
-# 台灣字頻分不出「冷僻沒用」和「冷僻但想要」——實測 恣 是 5 分而 祐 是 1 分，
-# 孳 6 分而 珮 7 分，昕 與 彤 是 0 分卻和 眥 剚 同級。沒有任何門檻能把它們分開，
-# 所以名單由使用者自己勾。字頻只在這裡當批次勾選的輔助，不當判準。
+# 第一版要使用者把不想要的字一個一個貼進來。使用者的評語是「如果要一個一個
+# 打，那有何用」——完全正確：冷僻字之所以煩人，正是因為你叫不出它們的名字。
+# 從字出發是錯的方向。
 #
-# 藏起來不等於刪掉：內建字典是第三方資料，完全沒動，把名單清空就全部回來。
+# 改成從分數出發：選一個字頻門檻，就列出所有低於它的字，看過之後一鍵套用。
+# 逐字勾選退居為「例外」——把門檻誤殺、但你其實要留的字勾起來。
+#
+# 兩種設定寫進 hidden-characters.json，判斷規則在
+# bopomofo_core\hidden_characters.py，優先序：
+#     always_show（一律保留）> hidden（一律隱藏）> minimum_frequency（門檻）
 
 $hiddenFileName = "hidden-characters.json"
+
+# 台灣字頻分不出「冷僻沒用」和「冷僻但想要」：恣 是 5 分而 祐 只有 1 分，
+# 孳 6 分而 珮 7 分。所以門檻只是快速的第一刀，勾選才是判準。
+$suggestedThreshold = 7
 
 @{
     Name  = "候選字過濾"
@@ -16,45 +25,65 @@ $hiddenFileName = "hidden-characters.json"
 
         $hiddenPath = Join-Path $Context.StateRoot $hiddenFileName
 
-        $readHidden = {
-            if (-not (Test-Path -LiteralPath $hiddenPath)) {
-                return New-Object System.Collections.Generic.HashSet[string]
+        # ---- 設定的讀寫 ----------------------------------------------------
+        $readSettings = {
+            $result = @{
+                Floor  = 0
+                Hidden = New-Object System.Collections.Generic.HashSet[string]
+                Keep   = New-Object System.Collections.Generic.HashSet[string]
             }
+            if (-not (Test-Path -LiteralPath $hiddenPath)) { return $result }
             try {
                 $value = Get-Content -LiteralPath $hiddenPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                $set = New-Object System.Collections.Generic.HashSet[string]
+                if ($null -ne $value.minimum_frequency) { $result.Floor = [int]$value.minimum_frequency }
                 foreach ($entry in @($value.hidden)) {
-                    if ($entry -and $entry.Length -eq 1) { [void]$set.Add([string]$entry) }
+                    if ($entry -and $entry.Length -eq 1) { [void]$result.Hidden.Add([string]$entry) }
                 }
-                $script:loadedFloor = 0
-                if ($null -ne $value.minimum_frequency) { $script:loadedFloor = [int]$value.minimum_frequency }
-                $script:loadedKeep = New-Object System.Collections.Generic.HashSet[string]
                 foreach ($entry in @($value.always_show)) {
-                    if ($entry -and $entry.Length -eq 1) { [void]$script:loadedKeep.Add([string]$entry) }
+                    if ($entry -and $entry.Length -eq 1) { [void]$result.Keep.Add([string]$entry) }
                 }
-                return $set
             }
-            catch { return New-Object System.Collections.Generic.HashSet[string] }
-        }
+            catch { }
+            return $result
+        }.GetNewClosure()
 
-        $writeHidden = {
-            param($set)
+        $writeSettings = {
+            param($floor, $hidden, $keep)
             New-Item -ItemType Directory -Path $Context.StateRoot -Force | Out-Null
             $payload = @{
-                hidden            = @($set | Sort-Object)
-                always_show       = @($script:loadedKeep | Sort-Object)
-                minimum_frequency = [int]$threshold.Value
+                minimum_frequency = [int]$floor
+                hidden            = @($hidden | Sort-Object)
+                always_show       = @($keep | Sort-Object)
                 version           = 1
             } | ConvertTo-Json
-            # UTF-8 **不含** BOM：Python 以 json 讀這個檔，BOM 會讓解析失敗，
-            # 而失敗是靜默的 —— 名單會看起來像空的，沒有任何錯誤訊息。
+            # UTF-8 **不含** BOM：Python 以 json 讀，BOM 會讓解析靜默失敗，
+            # 設定看起來就像從來沒存過。
             [IO.File]::WriteAllText($hiddenPath, $payload, (New-Object Text.UTF8Encoding($false)))
+        }.GetNewClosure()
+
+        # ---- 字頻表 --------------------------------------------------------
+        # 由輸入法模組提供。讀不到就照實說明，門檻仍然會生效。
+        $frequency = @{}
+        if ($Context.ModuleRoot) {
+            $dataDirectory = Join-Path $Context.ModuleRoot (Join-Path "bopomofo_core" "data")
+            $frequencyPath = Join-Path $dataDirectory "taiwan_frequency.json"
+            if (Test-Path -LiteralPath $frequencyPath) {
+                try {
+                    $raw = Get-Content -LiteralPath $frequencyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $node = if ($null -ne $raw.characters) { $raw.characters } else { $raw }
+                    foreach ($property in $node.PSObject.Properties) {
+                        $frequency[$property.Name] = [int]$property.Value
+                    }
+                }
+                catch { }
+            }
         }
 
-        $script:loadedFloor = 0
-        $script:loadedKeep = New-Object System.Collections.Generic.HashSet[string]
-        $hidden = & $readHidden
+        $settings = & $readSettings
+        $keepSet = $settings.Keep
+        $hiddenSet = $settings.Hidden
 
+        # ---- 版面 ----------------------------------------------------------
         $layout = New-Object System.Windows.Forms.TableLayoutPanel
         $layout.Dock = "Fill"
         $layout.ColumnCount = 1
@@ -70,36 +99,30 @@ $hiddenFileName = "hidden-characters.json"
         $top.WrapContents = $false
 
         $label = New-Object System.Windows.Forms.Label
-        $label.Text = "貼上要檢查的字"
+        $label.Text = "隱藏字頻低於"
         $label.AutoSize = $true
-        $label.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
+        $label.Margin = New-Object System.Windows.Forms.Padding(4, 9, 2, 4)
 
-        # 不可以叫 $input：那是 PowerShell 的自動變數（管線輸入列舉器），
-        # 在事件處理程序這種 scriptblock 裡會蓋掉同名的區域變數，$input.Text
-        # 於是變成 null。空白時按「列出這些字」就是這樣跳出例外的。
-        $inputBox = New-Object System.Windows.Forms.TextBox
-        # 這個框就是要輸入中文字的。WinForms 預設 Inherit，而承接到的狀態
-        # 不一定開著輸入法，使用者會發現只打得出英文。明確要求開啟。
-        $inputBox.ImeMode = [System.Windows.Forms.ImeMode]::On
-        $inputBox.Width = 320
-        $inputBox.Margin = New-Object System.Windows.Forms.Padding(4, 4, 8, 4)
+        $threshold = New-Object System.Windows.Forms.NumericUpDown
+        $threshold.Minimum = 0
+        $threshold.Maximum = 10000
+        $threshold.Width = 70
+        $threshold.Value = $settings.Floor
+        $threshold.Margin = New-Object System.Windows.Forms.Padding(2, 5, 2, 4)
 
-        $addButton = New-Object System.Windows.Forms.Button
-        $addButton.Text = "列出這些字"
-        $addButton.Width = 110
-        $addButton.Height = 26
-        $addButton.Margin = New-Object System.Windows.Forms.Padding(4)
+        $labelAfter = New-Object System.Windows.Forms.Label
+        $labelAfter.Text = "分的字"
+        $labelAfter.AutoSize = $true
+        $labelAfter.Margin = New-Object System.Windows.Forms.Padding(2, 9, 12, 4)
 
-        $showHiddenButton = New-Object System.Windows.Forms.Button
-        $showHiddenButton.Text = "只看已隱藏"
-        $showHiddenButton.Width = 110
-        $showHiddenButton.Height = 26
-        $showHiddenButton.Margin = New-Object System.Windows.Forms.Padding(4)
+        $summary = New-Object System.Windows.Forms.Label
+        $summary.AutoSize = $true
+        $summary.Margin = New-Object System.Windows.Forms.Padding(4, 9, 4, 4)
 
         [void]$top.Controls.Add($label)
-        [void]$top.Controls.Add($inputBox)
-        [void]$top.Controls.Add($addButton)
-        [void]$top.Controls.Add($showHiddenButton)
+        [void]$top.Controls.Add($threshold)
+        [void]$top.Controls.Add($labelAfter)
+        [void]$top.Controls.Add($summary)
 
         $grid = New-Object System.Windows.Forms.DataGridView
         $grid.Dock = "Fill"
@@ -108,183 +131,137 @@ $hiddenFileName = "hidden-characters.json"
         $grid.SelectionMode = "FullRowSelect"
         $grid.AutoSizeColumnsMode = "Fill"
         $grid.BackgroundColor = [System.Drawing.SystemColors]::Window
-        $tick = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
-        $tick.Name = "hide"
-        $tick.HeaderText = "隱藏"
-        $tick.FillWeight = 12
-        [void]$grid.Columns.Add($tick)
+        $keepColumn = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
+        $keepColumn.Name = "keep"
+        $keepColumn.HeaderText = "保留"
+        $keepColumn.FillWeight = 10
+        [void]$grid.Columns.Add($keepColumn)
         [void]$grid.Columns.Add("character", "字")
-        [void]$grid.Columns.Add("frequency", "台灣字頻")
+        [void]$grid.Columns.Add("score", "台灣字頻")
         $grid.Columns["character"].ReadOnly = $true
-        $grid.Columns["character"].FillWeight = 20
+        $grid.Columns["character"].FillWeight = 14
         $grid.Columns["character"].DefaultCellStyle.Font =
             New-Object System.Drawing.Font("Microsoft JhengHei UI", 14)
-        $grid.Columns["frequency"].ReadOnly = $true
-        $grid.Columns["frequency"].FillWeight = 68
-
-        $bulk = New-Object System.Windows.Forms.FlowLayoutPanel
-        $bulk.Dock = "Fill"
-        $bulk.AutoSize = $true
-        $bulk.WrapContents = $false
-        $bulkLabel = New-Object System.Windows.Forms.Label
-        $bulkLabel.Text = "把字頻低於"
-        $bulkLabel.AutoSize = $true
-        $bulkLabel.Margin = New-Object System.Windows.Forms.Padding(4, 9, 2, 4)
-        $threshold = New-Object System.Windows.Forms.NumericUpDown
-        $threshold.Minimum = 0
-        $threshold.Maximum = 10000
-        # 預設 0 = 關閉。開啟面板隨手按儲存不該意外套用一個門檻；
-        # 建議值寫在下面的說明裡，由使用者自己填。
-        $threshold.Value = 0
-        $threshold.Width = 70
-        $threshold.Margin = New-Object System.Windows.Forms.Padding(2, 4, 2, 4)
-        $bulkLabel2 = New-Object System.Windows.Forms.Label
-        $bulkLabel2.Text = "的字一律隱藏（這條規則會被儲存，涵蓋你沒列出來的字）"
-        $bulkLabel2.AutoSize = $true
-        $bulkLabel2.Margin = New-Object System.Windows.Forms.Padding(2, 9, 8, 4)
-        $bulkButton = New-Object System.Windows.Forms.Button
-        $bulkButton.Text = "同時勾選已列出的"
-        $bulkButton.Width = 70
-        $bulkButton.Height = 26
-        $bulkButton.Margin = New-Object System.Windows.Forms.Padding(4)
-        [void]$bulk.Controls.Add($bulkLabel)
-        [void]$bulk.Controls.Add($threshold)
-        [void]$bulk.Controls.Add($bulkLabel2)
-        [void]$bulk.Controls.Add($bulkButton)
-
-        $bottom = New-Object System.Windows.Forms.FlowLayoutPanel
-        $bottom.Dock = "Fill"
-        $bottom.AutoSize = $true
-        $bottom.WrapContents = $false
-        $saveButton = New-Object System.Windows.Forms.Button
-        $saveButton.Text = "儲存並重啟 PIME"
-        $saveButton.Width = 150
-        $saveButton.Height = 30
-        $saveButton.Margin = New-Object System.Windows.Forms.Padding(4)
-        $clearButton = New-Object System.Windows.Forms.Button
-        $clearButton.Text = "全部取消隱藏"
-        $clearButton.Width = 120
-        $clearButton.Height = 30
-        $clearButton.Margin = New-Object System.Windows.Forms.Padding(4)
-        $status = New-Object System.Windows.Forms.Label
-        $status.AutoSize = $true
-        $status.Margin = New-Object System.Windows.Forms.Padding(12, 10, 4, 4)
-        $status.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
-        [void]$bottom.Controls.Add($saveButton)
-        [void]$bottom.Controls.Add($clearButton)
-        [void]$bottom.Controls.Add($status)
-
-        # 字頻表由輸入法模組提供。讀不到就把欄位留白，勾選照樣可用 ——
-        # 名單才是判準，字頻只是輔助。
-        $frequency = @{}
-        if ($Context.ModuleRoot) {
-            $frequencyPath = Join-Path $Context.ModuleRoot "bopomofo_core\data\taiwan_frequency.json"
-            if (Test-Path -LiteralPath $frequencyPath) {
-                try {
-                    $raw = Get-Content -LiteralPath $frequencyPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                    $node = if ($null -ne $raw.characters) { $raw.characters } else { $raw }
-                    foreach ($property in $node.PSObject.Properties) {
-                        $frequency[$property.Name] = $property.Value
-                    }
-                }
-                catch { }
-            }
-        }
-
-        $fill = {
-            param($characters)
-            $grid.Rows.Clear()
-            foreach ($character in $characters) {
-                $score = if ($frequency.ContainsKey($character)) { $frequency[$character] } else { 0 }
-                $index = $grid.Rows.Add($hidden.Contains($character), $character, $score)
-                if ($hidden.Contains($character)) {
-                    $grid.Rows[$index].DefaultCellStyle.ForeColor =
-                        [System.Drawing.Color]::FromArgb(150, 150, 150)
-                }
-            }
-            $status.Text = "列出 $($grid.Rows.Count) 個字，目前已隱藏 $($hidden.Count) 個"
-        }.GetNewClosure()
-
-        $addButton.Add_Click({
-            $seen = New-Object System.Collections.Generic.HashSet[string]
-            $characters = @()
-            foreach ($character in $inputBox.Text.ToCharArray()) {
-                $text = [string]$character
-                # 空白、標點與注音都不是候選字，略過。
-                if ([char]::IsWhiteSpace($character)) { continue }
-                if ([int][char]$character -lt 0x3400) { continue }
-                if ($seen.Add($text)) { $characters += $text }
-            }
-            & $fill $characters
-        }.GetNewClosure())
-
-        $showHiddenButton.Add_Click({
-            & $fill (@($hidden) | Sort-Object)
-        }.GetNewClosure())
-
-        $bulkButton.Add_Click({
-            $cut = [int]$threshold.Value
-            $touched = 0
-            foreach ($row in $grid.Rows) {
-                $character = [string]$row.Cells["character"].Value
-                $score = if ($frequency.ContainsKey($character)) { $frequency[$character] } else { 0 }
-                if ($score -lt $cut -and -not [bool]$row.Cells["hide"].Value) {
-                    $row.Cells["hide"].Value = $true
-                    $touched++
-                }
-            }
-            $status.Text = "字頻低於 $cut 的規則會在儲存時生效；已列出的字順便勾了 $touched 個"
-        }.GetNewClosure())
-
-        $clearButton.Add_Click({
-            foreach ($row in $grid.Rows) { $row.Cells["hide"].Value = $false }
-            $hidden.Clear()
-            $status.Text = "已全部取消勾選，按儲存才生效"
-        }.GetNewClosure())
-
-        $saveButton.Add_Click({
-            try {
-                # 表格是目前檢視的字；沒列出來的維持原狀，不會被這次操作清掉。
-                $grid.EndEdit()
-                foreach ($row in $grid.Rows) {
-                    $character = [string]$row.Cells["character"].Value
-                    if ([bool]$row.Cells["hide"].Value) { [void]$hidden.Add($character) }
-                    else { [void]$hidden.Remove($character) }
-                }
-                & $writeHidden $hidden
-
-                $result = & $Context.RestartPime $Context.LauncherPath
-                $status.Text = "已儲存，共隱藏 $($hidden.Count) 個字。$($result.Message)"
-            }
-            catch {
-                [System.Windows.Forms.MessageBox]::Show(
-                    ($_ | Out-String), "儲存失敗",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-            }
-        }.GetNewClosure())
+        $grid.Columns["score"].ReadOnly = $true
+        $grid.Columns["score"].FillWeight = 76
 
         $hint = New-Object System.Windows.Forms.Label
         $hint.AutoSize = $true
         $hint.MaximumSize = New-Object System.Drawing.Size(880, 0)
         $hint.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
-        $hint.Margin = New-Object System.Windows.Forms.Padding(4, 6, 4, 4)
-        $hint.Text = "兩種手段一起用。字頻門檻負責大量的部分 —— 只靠手勾是打地鼠：實測把 ㄗˋ 的 孳 恣 磧 眥 剚 胔 藏起來之後，胾 扻 倳 牸 芓 絘 立刻遞補上來。逐字勾選則是對門檻的修正，因為字頻分不出好壞：恣 是 5 分而 祐 只有 1 分。門檻設 0 就是關閉（預設）。建議從 7 開始試：那是能砍掉 孳(6) 恣(5) 的最低值。這裡只是隱藏，內建字典沒有被改，把設定清掉就全部回來。一個讀音的候選若被全部隱藏，系統會保留原本的清單，以免打不出那個音。"
+        $hint.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
 
-        if ($script:loadedFloor -gt 0) { $threshold.Value = $script:loadedFloor }
-        & $fill (@($hidden) | Sort-Object)
+        $bottom = New-Object System.Windows.Forms.FlowLayoutPanel
+        $bottom.Dock = "Fill"
+        $bottom.AutoSize = $true
+        $bottom.WrapContents = $false
 
-        $stack = New-Object System.Windows.Forms.FlowLayoutPanel
-        $stack.Dock = "Fill"
-        $stack.AutoSize = $true
-        $stack.FlowDirection = "TopDown"
-        $stack.WrapContents = $false
-        [void]$stack.Controls.Add($bulk)
-        [void]$stack.Controls.Add($hint)
+        $applyButton = New-Object System.Windows.Forms.Button
+        $applyButton.Text = "套用並重啟 PIME"
+        $applyButton.Width = 150
+        $applyButton.Height = 30
+        $applyButton.Margin = New-Object System.Windows.Forms.Padding(4)
+
+        $offButton = New-Object System.Windows.Forms.Button
+        $offButton.Text = "關閉過濾"
+        $offButton.Width = 110
+        $offButton.Height = 30
+        $offButton.Margin = New-Object System.Windows.Forms.Padding(4)
+
+        $status = New-Object System.Windows.Forms.Label
+        $status.AutoSize = $true
+        $status.Margin = New-Object System.Windows.Forms.Padding(12, 10, 4, 4)
+        $status.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+
+        [void]$bottom.Controls.Add($applyButton)
+        [void]$bottom.Controls.Add($offButton)
+        [void]$bottom.Controls.Add($status)
+
+        # ---- 列出低於門檻的字 ----------------------------------------------
+        # 依分數由高到低：最接近門檻的排最前面，那正是最需要確認的一批。
+        # 分數遠低於門檻的沒有爭議，不必先看到。
+        $refresh = {
+            $cut = [int]$threshold.Value
+            $grid.Rows.Clear()
+
+            if ($frequency.Count -eq 0) {
+                $summary.Text = "讀不到字頻表"
+                $hint.Text = "找不到 taiwan_frequency.json，無法依分數列出。門檻仍然會生效，只是這裡看不到會被隱藏哪些字。"
+                return
+            }
+            if ($cut -le 0) {
+                $summary.Text = "過濾已關閉，所有字都會出現"
+                $hint.Text = "把門檻設成大於 0 的數字，就會列出低於它的字讓你先確認。建議從 $suggestedThreshold 開始試。"
+                return
+            }
+
+            $below = @(
+                $frequency.GetEnumerator() |
+                    Where-Object { $_.Value -lt $cut } |
+                    Sort-Object -Property @{ Expression = "Value"; Descending = $true }
+            )
+            foreach ($entry in $below) {
+                $character = $entry.Key
+                $index = $grid.Rows.Add($keepSet.Contains($character), $character, $entry.Value)
+                if ($keepSet.Contains($character)) {
+                    $grid.Rows[$index].DefaultCellStyle.ForeColor =
+                        [System.Drawing.Color]::FromArgb(0, 120, 60)
+                }
+            }
+            $summary.Text = "會隱藏 $($below.Count) 個字，另外保留 $($keepSet.Count) 個"
+            $hint.Text = ("由上而下是最接近門檻的字，也就是最需要看一眼的那批；想留下的勾「保留」。`r`n" +
+                          "門檻 1 特別安全：字頻表裡一個字都不會被動到，只隱藏表中完全沒收錄的字（眥、剚、襶 那類）。`r`n" +
+                          "字頻分不出好壞——恣 是 5 分而 祐 只有 1 分——所以門檻只是快速的第一刀，勾選才是判準。這裡只是隱藏，內建字典沒有被改。")
+        }.GetNewClosure()
+
+        $threshold.Add_ValueChanged($refresh)
+
+        $grid.Add_CellValueChanged({
+            param($sender, $eventArgs)
+            if ($eventArgs.RowIndex -lt 0) { return }
+            if ($grid.Columns[$eventArgs.ColumnIndex].Name -ne "keep") { return }
+            $row = $grid.Rows[$eventArgs.RowIndex]
+            $character = [string]$row.Cells["character"].Value
+            if ([bool]$row.Cells["keep"].Value) { [void]$keepSet.Add($character) }
+            else { [void]$keepSet.Remove($character) }
+            $status.Text = "已保留 $($keepSet.Count) 個字，按套用才生效"
+        }.GetNewClosure())
+
+        # 勾選框要離開儲存格才會提交值；立刻提交，使用者才看得到即時回饋。
+        $grid.Add_CurrentCellDirtyStateChanged({
+            if ($grid.IsCurrentCellDirty) {
+                $grid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+            }
+        }.GetNewClosure())
+
+        $applyButton.Add_Click({
+            try {
+                & $writeSettings ([int]$threshold.Value) $hiddenSet $keepSet
+                $result = & $Context.RestartPime $Context.LauncherPath
+                $status.Text = "已套用：門檻 $([int]$threshold.Value)，保留 $($keepSet.Count) 個。$($result.Message)"
+            }
+            catch {
+                $status.Text = "套用失敗：$($_.Exception.Message)"
+            }
+        }.GetNewClosure())
+
+        $offButton.Add_Click({
+            $threshold.Value = 0
+            try {
+                & $writeSettings 0 $hiddenSet $keepSet
+                $result = & $Context.RestartPime $Context.LauncherPath
+                $status.Text = "過濾已關閉，所有字都會回來。$($result.Message)"
+            }
+            catch {
+                $status.Text = "關閉失敗：$($_.Exception.Message)"
+            }
+        }.GetNewClosure())
+
+        & $refresh
 
         $layout.Controls.Add($top, 0, 0)
         $layout.Controls.Add($grid, 0, 1)
-        $layout.Controls.Add($stack, 0, 2)
+        $layout.Controls.Add($hint, 0, 2)
         $layout.Controls.Add($bottom, 0, 3)
         $layout
     }.GetNewClosure()
