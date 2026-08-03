@@ -1288,14 +1288,16 @@ def main() -> None:
             assert tone_service.compositionString == ""
 
         # Space supplies first tone and the dictionary decides whether a lone
-        # symbol can form Chinese. ㄉ cannot, while ㄜ and the syllabic initial
-        # ㄙ can; raw Zhuyin remains available as an alternate.
+        # symbol can form Chinese. ㄉ cannot, so the space emits the raw Zhuyin
+        # itself: the reading has no Chinese candidate at all, so the menu this
+        # used to open held one item and offered nothing to choose, while
+        # costing a keystroke and swallowing the next symbol. ㄜ and the
+        # syllabic initial ㄙ can, and still convert.
         initial_literal = PinnedBopomofoTextService(DummyClient())
         press(initial_literal, "2", sequence)  # ㄉ
         initial_menu = press(initial_literal, " ", sequence + 1)
-        assert initial_menu["candidateList"] == ["ㄉ"], initial_menu
-        initial_reply = candidate_selection_key(initial_literal, 0, sequence + 2)
-        assert initial_reply["commitString"] == "ㄉ"
+        assert initial_menu["commitString"] == "ㄉ", initial_menu
+        assert not initial_menu["showCandidates"], initial_menu
 
         rime_literal = PinnedBopomofoTextService(DummyClient())
         press(rime_literal, "k", sequence + 3)  # ㄜ
@@ -1508,8 +1510,19 @@ def main() -> None:
                 special_key(literal_service, 0x28, sequence + 2)
                 choices = [choice.text for choice in literal_service.candidate_choices]
                 assert literal in choices[:4], (literal, choices)
+            elif len(candidates) == 1:
+                # No Chinese syllable exists for this reading, so there is
+                # nothing to choose between and the space emits the Zhuyin
+                # itself. That is what lets ㄏ+space be repeated at typing
+                # speed, as in Microsoft Bopomofo.
+                assert reply["commitString"] == literal, (literal, reply)
+                assert not reply["showCandidates"], (literal, reply)
             else:
+                # A literal ranked first with rare Han characters behind it
+                # (ㄑ→胠) still opens the menu: auto-accepting one of those
+                # would be wrong.
                 assert reply["candidateList"][0] == literal, (literal, reply)
+                assert len(reply["candidateList"]) > 1, (literal, reply)
             sequence += 3
         assert standalone_defaults["ㄧ"][0] == "一"
         assert "阿" in standalone_defaults["ㄚ"]
@@ -1785,6 +1798,49 @@ def main() -> None:
         )
         assert bare_reply["return"] is True, bare_reply
         assert "ㄝ" in bare_reply.get("compositionString", ""), bare_reply
+
+        # A symbol with no Chinese syllable of its own is emitted by the space
+        # itself, so ㄏ+space repeats at typing speed as it does in Microsoft
+        # Bopomofo. Routing it through a one-item candidate menu cost an extra
+        # keystroke and swallowed the next symbol: with the menu open,
+        # retyping ㄏ only replaced the initial with itself, so this exact
+        # sequence used to produce a single ㄏ.
+        literal_service = PinnedBopomofoTextService(DummyClient())
+        literal_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "lone-symbol-phrases.json")
+        )
+        committed = ""
+        for repeat in range(3):
+            press(literal_service, "c", 2300 + repeat * 2)
+            space_reply = special_key(literal_service, 0x20, 2301 + repeat * 2)
+            assert space_reply.get("commitString") == "ㄏ", space_reply
+            assert not space_reply.get("showCandidates"), space_reply
+            committed += space_reply["commitString"]
+        assert committed == "ㄏㄏㄏ", committed
+
+        # The menu still exists for its actual purpose. libchewing appends rare
+        # Han characters to some lone symbols (ㄑ→胠); auto-accepting one of
+        # those would be wrong, so a literal with company keeps the menu.
+        rare_service = PinnedBopomofoTextService(DummyClient())
+        press(rare_service, "f", 2320)
+        rare_reply = special_key(rare_service, 0x20, 2321)
+        assert rare_reply.get("showCandidates") is True, rare_reply
+        assert rare_reply.get("candidateList")[0] == "ㄑ", rare_reply
+        assert len(rare_reply.get("candidateList")) > 1, rare_reply
+        assert not rare_reply.get("commitString"), rare_reply
+
+        # A symbol that is a complete syllable still converts to Hanzi in the
+        # editable buffer rather than emitting raw Zhuyin. Which character wins
+        # depends on what this run has already learned, so assert the property
+        # rather than a particular character.
+        syllable_service = PinnedBopomofoTextService(DummyClient())
+        press(syllable_service, "g", 2330)
+        syllable_reply = special_key(syllable_service, 0x20, 2331)
+        assert not syllable_reply.get("commitString"), syllable_reply
+        composed = syllable_reply.get("compositionString")
+        assert composed and not syllable_service._is_literal_bopomofo(composed), (
+            syllable_reply
+        )
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

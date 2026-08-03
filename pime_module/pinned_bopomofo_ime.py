@@ -431,17 +431,27 @@ class PinnedBopomofoTextService(TextService):
                 literal = self.session.preedit
                 event = self.session.input_symbol("ˉ")
                 if event.kind is EventKind.BELL and self.session.preedit:
-                    # This exact first-tone reading has no Chinese syllable,
-                    # but Microsoft Bopomofo still lets users output the raw
-                    # Zhuyin symbol through the candidate window.
-                    literal = self.session.preedit
-                    self.session.candidates = [literal]
-                    self.reading_open = True
-                    self.candidate_page = 0
-                    self.setCandidateList([literal])
-                    self.setCandidateCursor(0)
-                    self.setShowCandidates(True)
-                    self._render_buffer(keep_candidates=True)
+                    # A first tone the session refuses outright. The raw
+                    # Zhuyin is what the user asked for.
+                    self._emit_or_buffer_literal(self.session.preedit)
+                    return True
+                if len(self.session.candidates) == 1 and self._is_literal_bopomofo(
+                    self.session.candidates[0]
+                ):
+                    # Space supplied the tone and the reading turned out to
+                    # have no Chinese syllable at all, so its only candidate
+                    # is the raw Zhuyin and a menu offers nothing to choose.
+                    # Microsoft Bopomofo emits it on the space itself, which
+                    # is what makes ㄏ+space repeatable at typing speed. The
+                    # one-item menu cost a keystroke and swallowed input: with
+                    # it open, retyping ㄏ only replaced the initial with
+                    # itself, so ㄏ空ㄏ空ㄏ空 produced a single ㄏ.
+                    #
+                    # This lives here rather than in _handle_session_event
+                    # because a tone the user typed explicitly is a different
+                    # act: ㄢ˙ also has only the literal, and its menu is how
+                    # Microsoft lets a deliberate phonetic spelling be chosen.
+                    self._emit_or_buffer_literal(self.session.candidates[0])
                     return True
                 self._handle_session_event(event)
                 return True
