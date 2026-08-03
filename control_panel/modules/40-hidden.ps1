@@ -75,6 +75,9 @@ $hiddenFileName = "hidden-characters.json"
         $label.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
 
         $input = New-Object System.Windows.Forms.TextBox
+        # 這個框就是要輸入中文字的。WinForms 預設 Inherit，而承接到的狀態
+        # 不一定開著輸入法，使用者會發現只打得出英文。明確要求開啟。
+        $input.ImeMode = [System.Windows.Forms.ImeMode]::On
         $input.Width = 320
         $input.Margin = New-Object System.Windows.Forms.Padding(4, 4, 8, 4)
 

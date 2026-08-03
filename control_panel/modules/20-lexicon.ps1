@@ -76,6 +76,9 @@ $readJsonObject = {
             $searchLabel.AutoSize = $true
             $searchLabel.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
             $search = New-Object System.Windows.Forms.TextBox
+            # 詞庫是中文的，搜尋框當然要能打中文。WinForms 預設 Inherit，
+            # 承接到的狀態不一定開著輸入法。
+            $search.ImeMode = [System.Windows.Forms.ImeMode]::On
             $search.Width = 260
             $search.Margin = New-Object System.Windows.Forms.Padding(4, 4, 12, 4)
             $count = New-Object System.Windows.Forms.Label

@@ -33,6 +33,32 @@ function Stop-SmartPriorityCandidateUiAndWait {
     # failure report, 2026-08-01 — the helper runs on every machine now
     # that the out-of-process window ships enabled).
     $helpers = @(Get-Process SmartPriorityCandidateUI -ErrorAction SilentlyContinue)
+
+    # The control panel is a PowerShell process whose working directory sits
+    # inside the module, so an open panel locks the very directory the
+    # installer is about to replace -- and an empty locked directory gives the
+    # same "file in use" failure as a running executable, with nothing obvious
+    # holding it. Match on the command line rather than the process name,
+    # because the name is just powershell.exe.
+    #
+    # Match "-File <path>" rather than the bare path. A plain substring test
+    # also matches any command that merely mentions the panel -- a diagnostic
+    # one-liner was caught that way -- and force-killing an unrelated process
+    # is far worse than an installer that has to ask the user to close a window.
+    $panels = @(
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -match '-File\s+"?[^"]*SmartPriorityControlPanel\.ps1'
+            }
+    )
+    foreach ($panel in $panels) {
+        $process = Get-Process -Id $panel.ProcessId -ErrorAction SilentlyContinue
+        if ($process) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $helpers += $process
+        }
+    }
+
     foreach ($helper in $helpers) {
         Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
     }

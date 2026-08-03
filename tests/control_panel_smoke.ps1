@@ -76,7 +76,7 @@ print(json.dumps({"bopomofo": KEY_TO_SYMBOL, "ctrl": ctrl}, ensure_ascii=False))
         "0xBF" = "/"; "0xDB" = "["; "0xDD" = "]"; "0xDE" = "'"
     }
 
-    $keymapModule = ($modules | Where-Object { $_.File -like "*keymap*" }).Definition
+    $keymapModule = ($modules | Where-Object { $_.File -like "*guide*" }).Definition
     Assert-True ($null -ne $keymapModule.Tables) "按鍵對照模組沒有輸出 Tables，無法比對"
 
     if ($keymapModule.Tables) {
@@ -117,48 +117,30 @@ print(json.dumps({"bopomofo": KEY_TO_SYMBOL, "ctrl": ctrl}, ensure_ascii=False))
     }
 }
 
-# --- 3c. 鍵盤真的畫得出來 ------------------------------------------------
-# 只檢查「建構成功」不夠：閉包抓不到表格時，Paint 的迴圈會安靜地空轉，
-# 分頁看起來正常、鍵盤卻整片空白，沒有任何錯誤。所以實際渲染再數像素。
+# --- 3c. 說明內容真的產生得出來 -------------------------------------------
+# 只檢查「建構成功」不夠：整份說明是靠一連串閉包附加文字，閉包抓不到東西時
+# 會安靜地產出一個空白頁，分頁看起來完全正常。所以直接讀回文字長度與關鍵字。
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $fixtureContext = [pscustomobject]@{
     UiFont   = New-Object System.Drawing.Font("Microsoft JhengHei UI", 9)
     MonoFont = New-Object System.Drawing.Font("Consolas", 9)
 }
-$keymapDefinition = ($modules | Where-Object { $_.File -like "*keymap*" }).Definition
-$probe = New-Object System.Windows.Forms.Form
-$probe.ClientSize = New-Object System.Drawing.Size(900, 420)
-try {
-    $probe.Controls.Add((& $keymapDefinition.Build $fixtureContext))
-    $probe.Show()
-    for ($i = 0; $i -lt 20; $i++) {
-        [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 20
+$guideDefinition = ($modules | Where-Object { $_.File -like "*guide*" }).Definition
+$guide = & $guideDefinition.Build $fixtureContext
+Assert-True ($guide -is [System.Windows.Forms.RichTextBox]) "使用說明沒有回傳文字控制項"
+if ($guide -is [System.Windows.Forms.RichTextBox]) {
+    Assert-True ($guide.TextLength -gt 600) "使用說明內容過短（$($guide.TextLength) 字），閉包可能沒抓到東西"
+    foreach ($topic in @("空白鍵", "Shift", "Ctrl", "個人詞庫", "候選字過濾", "PinnedBopomofo")) {
+        Assert-True ($guide.Text -match [regex]::Escape($topic)) "使用說明沒有提到「$topic」"
     }
-    $shot = New-Object System.Drawing.Bitmap($probe.ClientSize.Width, $probe.ClientSize.Height)
-    $probe.DrawToBitmap($shot, (New-Object System.Drawing.Rectangle(0, 0, $shot.Width, $shot.Height)))
-
-    # 數「非白像素」是行不通的：沒畫到的地方是黑的，一樣算非白。改成找只有
-    # 鍵盤才會出現的顏色 —— 有 Ctrl 標點的鍵，鍵面填的是這個淡藍。畫不出來
-    # 的話一個都不會有。
-    $faceR, $faceG, $faceB = 240, 246, 255
-    $tinted = 0
-    for ($y = 12; $y -lt 285; $y += 3) {
-        for ($x = 12; $x -lt 860; $x += 3) {
-            $pixel = $shot.GetPixel($x, $y)
-            if ([Math]::Abs($pixel.R - $faceR) -le 6 -and
-                [Math]::Abs($pixel.G - $faceG) -le 6 -and
-                [Math]::Abs($pixel.B - $faceB) -le 6) { $tinted++ }
-        }
+    # 標點對照表必須是從 Tables 產生的，不是另外手寫一份。
+    foreach ($key in $guideDefinition.Tables.Ctrl.Keys) {
+        $mark = $guideDefinition.Tables.Ctrl[$key]
+        Assert-True ($guide.Text -match [regex]::Escape($mark)) "說明裡找不到標點「$mark」"
     }
-    $shot.Dispose()
-    Assert-True ($tinted -gt 500) "鍵盤沒有畫出來：找不到有標點的鍵面（符合的像素只有 $tinted 個）"
 }
-finally {
-    $probe.Close()
-    $probe.Dispose()
-}
+$guide.Dispose()
 
 # --- 4. 壞掉的模組不會拖垮控制台 ----------------------------------------
 # 真的放一個壞檔進去再跑整個殼，而不是只檢查程式碼裡有 try/catch。
@@ -169,7 +151,7 @@ try {
     Assert-True ($output -match "modules=5") "壞掉的模組應仍被列出並以錯誤分頁呈現，實際輸出：$output"
     Assert-True ($output -match "buildFailures=0") "只有載入失敗的模組不該再產生建構失敗：$output"
     Assert-True ($output -match "載入失敗") "壞掉的模組沒有被標示為載入失敗：$output"
-    foreach ($name in @("狀態", "個人詞庫", "按鍵對照")) {
+    foreach ($name in @("狀態", "個人詞庫", "使用說明", "候選字過濾")) {
         Assert-True ($output -match $name) "壞掉的模組拖垮了「$name」分頁：$output"
     }
 }
