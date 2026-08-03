@@ -1,4 +1,4 @@
-"""Smoke-test PIME's editable multi-character composition buffer.
+﻿"""Smoke-test PIME's editable multi-character composition buffer.
 
 Run with PIME's bundled 32-bit Python after building the overlay.  This file
 is deliberately not named ``test_*.py`` because the normal test runner is
@@ -1897,6 +1897,49 @@ def main() -> None:
             {"method": "onPreservedKey", "seqNum": 2405, "guid": SHIFT_TOGGLE_GUID}
         )
         assert preserved_service.english_mode is False
+
+        # A host that reports the Shift release but never calls onKeyUp. This
+        # is the AnyDesk session as measured, not a guess: one release produced
+        # two filterKeyUp calls, the first handled, and no onKeyUp at all. The
+        # toggle used to live only in onKeyUp, so it never ran and the mode
+        # stayed stuck in Chinese.
+        stuck_service = PinnedBopomofoTextService(DummyClient())
+        stuck_service.handleRequest(
+            {"method": "onActivate", "seqNum": 2500, "isKeyboardOpen": False}
+        )
+        assert stuck_service.english_mode is False
+
+        filter_key(stuck_service, "filterKeyDown", 0x10, 2501, shift=True)
+        first_up = filter_key(stuck_service, "filterKeyUp", 0x10, 2502)
+        assert first_up["return"] is True, first_up
+        second_up = filter_key(stuck_service, "filterKeyUp", 0x10, 2503)
+        assert second_up["return"] is False, second_up
+        # No onKeyUp: exactly what the trace showed.
+        assert stuck_service.english_mode is False, "nothing should have toggled yet"
+
+        # The next key catches up, so it is typed in English rather than
+        # starting a Bopomofo reading.
+        caught_up = filter_key(stuck_service, "filterKeyDown", 0x41, 2504)
+        assert stuck_service.english_mode is True, "the deferred toggle never ran"
+        assert caught_up["return"] is False, caught_up
+
+        # Tapping again switches back, so the catch-up cannot strand the user
+        # in English.
+        filter_key(stuck_service, "filterKeyDown", 0x10, 2505, shift=True)
+        filter_key(stuck_service, "filterKeyUp", 0x10, 2506)
+        filter_key(stuck_service, "filterKeyDown", 0x41, 2507)
+        assert stuck_service.english_mode is False
+
+        # A host that does deliver onKeyUp must still toggle exactly once: the
+        # catch-up must not fire again on the following key.
+        normal_service = PinnedBopomofoTextService(DummyClient())
+        normal_service.handleRequest(
+            {"method": "onActivate", "seqNum": 2520, "isKeyboardOpen": False}
+        )
+        tap_shift(normal_service, 2521)
+        assert normal_service.english_mode is True
+        filter_key(normal_service, "filterKeyDown", 0x41, 2525)
+        assert normal_service.english_mode is True, "the catch-up toggled a second time"
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

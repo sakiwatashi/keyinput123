@@ -318,6 +318,19 @@ class PinnedBopomofoTextService(TextService):
         self.last_key_down_time = 0.0
 
     def filterKeyDown(self, keyEvent):
+        if self.pending_shift_toggle:
+            # onKeyUp never arrived. Measured inside an AnyDesk session: one
+            # Shift release produces two filterKeyUp calls and no onKeyUp at
+            # all, so the toggle -- which lives in onKeyUp because that is
+            # where a TSF edit session exists -- simply never ran. Catch up
+            # here, on the next key, rather than lose the release.
+            if self.isComposing():
+                # Toggling has to commit the composition, and that needs the
+                # edit session only onKeyDown gets. Claim this key so
+                # onKeyDown runs and can finish the job properly.
+                return True
+            self.pending_shift_toggle = False
+            self.english_mode = not self.english_mode
         self.last_key_event = keyEvent
         if self.last_key_down_time == 0.0:
             self.last_key_down_time = time.time()
@@ -359,6 +372,12 @@ class PinnedBopomofoTextService(TextService):
         return symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None
 
     def onKeyDown(self, keyEvent):
+        if self.pending_shift_toggle:
+            # The release filterKeyDown deferred here because a composition
+            # was open. This callback has the edit session, so the toggle can
+            # commit before the key that arrived is handled in the new mode.
+            self.pending_shift_toggle = False
+            self._toggle_language_mode()
         # Mirrors filterKeyDown: ahead of the English-mode passthrough so the
         # Ctrl punctuation shortcuts work in both modes.
         ctrl_punctuation = self._ctrl_punctuation(keyEvent)
