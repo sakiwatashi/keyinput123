@@ -55,6 +55,9 @@ jobs:
       - name: Test candidate filter split panes
         shell: powershell
         run: .\tests\hidden_filter_panes_smoke.ps1
+      - name: Test health check detects a broken install
+        shell: powershell
+        run: .\tests\health_check_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1

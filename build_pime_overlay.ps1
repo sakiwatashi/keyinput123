@@ -33,6 +33,10 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "feedback-report.ps1") -Destinati
 Copy-Item -LiteralPath (Join-Path $projectRoot "prune_phrases.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "list_hidden.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "control_panel") -Destination $moduleRoot -Recurse -Force
+# 健康檢查要跟著模組一起裝，控制台的按鈕才叫得到它——那顆鈕存在的意義正是
+# 「輸入法壞掉時」還能用，所以它不能依賴原始碼樹還在。
+New-Item -ItemType Directory -Path (Join-Path $moduleRoot "tools") -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot "tools\health_check.ps1") -Destination (Join-Path $moduleRoot "tools") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moduleRoot -Force

@@ -63,9 +63,14 @@
         $applyButton   = New-Button "套用並重啟 PIME" 150
         $refreshButton = New-Button "重新整理" 100
         $folderButton  = New-Button "開啟資料夾" 110
+        # 「輸入法不能用了」的第一站。這一頁的表格說的是各個零件的狀態，健康
+        # 檢查說的是它們**合起來能不能運作**——文字服務 DLL 不見時語言列照樣
+        # 選得到我們的輸入法，那個假象只有靠這支才看得穿。
+        $healthButton  = New-Button "健康檢查" 110
         [void]$buttons.Controls.Add($applyButton)
         [void]$buttons.Controls.Add($refreshButton)
         [void]$buttons.Controls.Add($folderButton)
+        [void]$buttons.Controls.Add($healthButton)
 
         # 這兩個助手寫成**變數**而不是 function，$refresh 也一定要 GetNewClosure。
         #
@@ -176,6 +181,35 @@
         }.GetNewClosure())
 
         $refreshButton.Add_Click($refresh)
+
+        $healthButton.Add_Click({
+            $checker = if ($Context.ModuleRoot) {
+                Join-Path $Context.ModuleRoot (Join-Path "tools" "health_check.ps1")
+            } else { $null }
+            if (-not $checker -or -not (Test-Path -LiteralPath $checker)) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "找不到 health_check.ps1，請重新安裝。", "健康檢查",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+                return
+            }
+            try {
+                # 只檢查，不修。修復要動到 Program Files，得提權，那是使用者
+                # 該明確決定的事，不能藏在一顆「檢查」鈕後面。
+                $output = (& $checker 2>&1 | Out-String)
+                [System.Windows.Forms.MessageBox]::Show(
+                    $output, "健康檢查",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    $(if ($output -match "\[失敗\]") { [System.Windows.Forms.MessageBoxIcon]::Warning }
+                      else { [System.Windows.Forms.MessageBoxIcon]::Information })) | Out-Null
+            }
+            catch {
+                [System.Windows.Forms.MessageBox]::Show(
+                    ($_ | Out-String), "健康檢查失敗",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+            }
+        }.GetNewClosure())
 
         $folderButton.Add_Click({
             New-Item -ItemType Directory -Path $Context.StateRoot -Force | Out-Null
