@@ -123,4 +123,38 @@ if ($shortcutProblems.Count -gt 0) {
     throw ("Desktop shortcut wiring is inconsistent:`n  " + ($shortcutProblems -join "`n  "))
 }
 
+
+# --- 捷徑必須放在「所有使用者」的位置 ---------------------------------------
+#
+# 安裝腳本永遠在提權後的行程裡執行，所以 GetFolderPath(Desktop) 拿到的是
+# 「提權者」的桌面。使用者若是標準帳號、輸入別人的管理員密碼提權，捷徑就落在
+# 那個管理員的桌面上，使用者什麼都看不到——而桌面捷徑正是輸入法壞掉時唯一的
+# 求救入口。這個 bug 在開發者自己的機器上永遠不會出現（提權是同一個帳號），
+# 所以只能靠靜態檢查擋。
+$contextProblems = @()
+if ($installText -match "SpecialFolder\]::Desktop\)" -and
+    $installText -notmatch "legacyDesktop") {
+    $contextProblems += "install.ps1 用了目前使用者的桌面，應該用 CommonDesktopDirectory"
+}
+if ($installText -notmatch "CommonDesktopDirectory") {
+    $contextProblems += "install.ps1 沒有把桌面捷徑放在所有使用者的桌面"
+}
+if ($installText -notmatch "CommonPrograms") {
+    $contextProblems += "install.ps1 沒有把開始功能表捷徑放在所有使用者的位置"
+}
+# 解除安裝必須兩個位置都清，否則升級過來的使用者會留下點了沒反應的圖示。
+foreach ($needle in @("CommonDesktopDirectory", "CommonPrograms", "SpecialFolder]::Desktop", "SpecialFolder]::Programs")) {
+    if ($uninstallText -notmatch [regex]::Escape($needle)) {
+        $contextProblems += "uninstall.ps1 沒有清理 $needle 底下的捷徑"
+    }
+}
+# NSIS 自己也建解除安裝捷徑，位置要跟上面一致，不然會分家在兩個資料夾。
+$nsiText = [IO.File]::ReadAllText($nsiPath)
+if ($nsiText -match "SetShellVarContext current") {
+    $contextProblems += "NSIS 仍使用 SetShellVarContext current，解除安裝捷徑會跟其他捷徑分家"
+}
+if ($contextProblems.Count -gt 0) {
+    throw ("Shortcut location is wrong for a machine-wide install:`n  " + ($contextProblems -join "`n  "))
+}
+
 Write-Output "PASS: installer scripts are packaged, free of control characters, and their Windows paths resolve"

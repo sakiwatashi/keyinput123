@@ -6,7 +6,7 @@
 ## 1. 專案現況
 
 - 正式位置：https://github.com/sakiwatashi/keyinput123
-- 最新版本：**v0.7.0**，安裝檔由 CI 自動建置發布（推 tag 才會產生）
+- 最新版本：**v0.7.1**，安裝檔由 CI 自動建置發布（推 tag 才會產生）
 - 舊 repo `sakiwatashi/inputmethod` 已封存唯讀，release 與 tag 皆已刪除，
   README 有搬遷公告。**不要再往那裡推東西。**
 - 版控乾淨，本機與遠端同步。**注意本機 git 結構**：開發在外層 repo 的工作

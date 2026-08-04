@@ -167,9 +167,17 @@ try {
     Get-ChildItem -LiteralPath $overlayModule -Force |
         Copy-Item -Destination $targetModule -Recurse -Force
 
+    # 捷徑一律放「所有使用者」的位置，不是目前使用者的。
+    #
+    # 這是全機器安裝：RequestExecutionLevel admin、裝進 Program Files、設定寫
+    # HKLM。而這支腳本永遠在**提權後**的行程裡執行，所以 GetFolderPath(Desktop)
+    # 拿到的是「提權者」的桌面。使用者若是標準帳號、輸入別人的管理員密碼提權，
+    # 捷徑就會落在那個管理員的桌面上，使用者桌面一片空白——而桌面捷徑正是輸入法
+    # 壞掉時唯一的求救入口，偏偏在這種情境下不存在。
+    # Common* 不受提權身分影響，而且同一台機器上每個帳號都拿得到入口。
     $feedbackTool = Join-Path $targetModule "feedback-report.ps1"
     if (Test-Path -LiteralPath $feedbackTool) {
-        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
         $shortcutRoot = Join-Path $programs "智慧優先注音"
         New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
         $shortcutPath = Join-Path $shortcutRoot "轉換錯誤回報工具.lnk"
@@ -187,7 +195,7 @@ try {
     # 跑腳本，沒有捷徑的話一般使用者根本找不到入口。
     $controlPanel = Join-Path $targetModule "control_panel\SmartPriorityControlPanel.ps1"
     if (Test-Path -LiteralPath $controlPanel) {
-        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+        $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
         $shortcutRoot = Join-Path $programs "智慧優先注音"
         New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
         $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -208,7 +216,7 @@ try {
     # 使用者被關在門外。這個捷徑指向 launch_smart_priority.ps1，缺什麼補什麼。
     $launcherScript = Join-Path $targetModule "control_panel\launch_smart_priority.ps1"
     if (Test-Path -LiteralPath $launcherScript) {
-        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
         $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path $desktop "智慧優先注音.lnk"))
@@ -220,6 +228,17 @@ try {
         $shortcut.Save()
     }
 
+
+    # 0.7.0 之前捷徑放在提權者的個人資料夾。升級時清掉，否則桌面會同時出現
+    # 兩個一樣的圖示，而舊的那個在下次解除安裝時不會被移除。
+    $legacyDesktop = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)) "智慧優先注音.lnk"
+    if (Test-Path -LiteralPath $legacyDesktop) {
+        Remove-Item -LiteralPath $legacyDesktop -Force -ErrorAction SilentlyContinue
+    }
+    $legacyPrograms = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)) "智慧優先注音"
+    if (Test-Path -LiteralPath $legacyPrograms) {
+        Remove-Item -LiteralPath $legacyPrograms -Recurse -Force -ErrorAction SilentlyContinue
+    }
     # A fresh PIME installation bundles New Chewing. This product needs PIME
     # as infrastructure but exposes only Smart Priority Bopomofo. Never remove
     # New Chewing from a PIME installation that existed before this setup.

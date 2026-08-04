@@ -3,7 +3,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
 !define PRODUCT_NAME "智慧優先注音"
-!define PRODUCT_VERSION "0.7.0"
+!define PRODUCT_VERSION "0.7.1"
 !define PRODUCT_PUBLISHER "Smart Priority Bopomofo contributors"
 !define PRODUCT_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
 
@@ -14,7 +14,7 @@ InstallDirRegKey HKLM "${PRODUCT_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.7.0.0"
+VIProductVersion "0.7.1.0"
 VIAddVersionKey /LANG=1028 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1028 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1028 "FileDescription" "${PRODUCT_NAME} 安裝程式"
@@ -74,7 +74,8 @@ SmartPriorityFresh:
 FunctionEnd
 
 Section "安裝智慧優先注音" SEC_MAIN
-    SetShellVarContext current
+    ; 所有使用者：這是全機器安裝，而且提權者未必是使用者本人。
+    SetShellVarContext all
     SetOutPath "$INSTDIR"
     ; install.ps1 and uninstall.ps1 dot-source the two helpers below. A helper
     ; that is missing from this list aborts the script before it reaches
@@ -128,7 +129,8 @@ Section "安裝智慧優先注音" SEC_MAIN
 SectionEnd
 
 Section "Uninstall"
-    SetShellVarContext current
+    ; 所有使用者：這是全機器安裝，而且提權者未必是使用者本人。
+    SetShellVarContext all
     ${If} ${RunningX64}
         StrCpy $1 "$WINDIR\SysNative\WindowsPowerShell\v1.0\powershell.exe"
     ${Else}

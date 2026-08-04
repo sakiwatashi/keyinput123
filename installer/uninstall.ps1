@@ -124,24 +124,39 @@ try {
         Set-WinUserLanguageList -LanguageList $languages -Force
     }
 
-    $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
-    $shortcutRoot = Join-Path $programs "智慧優先注音"
-    foreach ($name in @("轉換錯誤回報工具.lnk", "智慧優先注音 控制台.lnk")) {
-        $shortcutPath = Join-Path $shortcutRoot $name
-        if (Test-Path -LiteralPath $shortcutPath) {
-            Remove-Item -LiteralPath $shortcutPath -Force
+    # 兩個位置都要清：現在裝在「所有使用者」底下，但 0.7.0 之前是裝在提權者的
+    # 個人資料夾。只清其中一邊，另一邊就會留下點了沒反應的圖示，而且沒有任何
+    # 錯誤訊息——沒有人會發現。
+    $programsRoots = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+    )
+    foreach ($programs in $programsRoots) {
+        if (-not $programs) { continue }
+        $shortcutRoot = Join-Path $programs "智慧優先注音"
+        foreach ($name in @("轉換錯誤回報工具.lnk", "智慧優先注音 控制台.lnk")) {
+            $shortcutPath = Join-Path $shortcutRoot $name
+            if (Test-Path -LiteralPath $shortcutPath) {
+                Remove-Item -LiteralPath $shortcutPath -Force
+            }
         }
-    }
-    if ((Test-Path -LiteralPath $shortcutRoot) -and
-        -not (Get-ChildItem -LiteralPath $shortcutRoot -Force)) {
-        Remove-Item -LiteralPath $shortcutRoot -Force
+        if ((Test-Path -LiteralPath $shortcutRoot) -and
+            -not (Get-ChildItem -LiteralPath $shortcutRoot -Force)) {
+            Remove-Item -LiteralPath $shortcutRoot -Force
+        }
     }
 
     # 桌面捷徑也要收，不然解除安裝後桌面留下一個點了沒反應的圖示。
-    $desktopShortcut = Join-Path `
-        ([Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)) "智慧優先注音.lnk"
-    if (Test-Path -LiteralPath $desktopShortcut) {
-        Remove-Item -LiteralPath $desktopShortcut -Force
+    $desktopRoots = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+    )
+    foreach ($desktop in $desktopRoots) {
+        if (-not $desktop) { continue }
+        $desktopShortcut = Join-Path $desktop "智慧優先注音.lnk"
+        if (Test-Path -LiteralPath $desktopShortcut) {
+            Remove-Item -LiteralPath $desktopShortcut -Force
+        }
     }
 
     $nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
