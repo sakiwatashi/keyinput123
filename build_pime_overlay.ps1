@@ -39,6 +39,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "control_panel") -Destination $mo
 New-Item -ItemType Directory -Path (Join-Path $moduleRoot "tools") -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "tools\health_check.ps1") -Destination (Join-Path $moduleRoot "tools") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "tools\backup_user_data.ps1") -Destination (Join-Path $moduleRoot "tools") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "tools\audit_text_service.ps1") -Destination (Join-Path $moduleRoot "tools") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moduleRoot -Force
