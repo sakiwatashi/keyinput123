@@ -159,6 +159,14 @@ $maximumThreshold = 20
         [void]$top.Controls.Add($labelAfter)
         [void]$top.Controls.Add($summary)
 
+        # 左右各一半：左邊是門檻選出的候選，右邊是**目前實際生效**的過濾結果。
+        # 兩者不同步是刻意的——左邊反映你正在調的門檻，右邊反映已經套用的設定，
+        # 對照著看才知道按下套用會變成什麼樣。
+        $split = New-Object System.Windows.Forms.SplitContainer
+        $split.Dock = "Fill"
+        $split.Orientation = "Vertical"
+        $split.SplitterWidth = 8
+
         $grid = New-Object System.Windows.Forms.DataGridView
         $grid.Dock = "Fill"
         $grid.AllowUserToAddRows = $false
@@ -169,16 +177,57 @@ $maximumThreshold = 20
         $keepColumn = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
         $keepColumn.Name = "keep"
         $keepColumn.HeaderText = "保留"
-        $keepColumn.FillWeight = 10
+        $keepColumn.FillWeight = 16
         [void]$grid.Columns.Add($keepColumn)
         [void]$grid.Columns.Add("character", "字")
-        [void]$grid.Columns.Add("score", "台灣字頻")
+        [void]$grid.Columns.Add("score", "字頻")
         $grid.Columns["character"].ReadOnly = $true
-        $grid.Columns["character"].FillWeight = 14
+        $grid.Columns["character"].FillWeight = 22
         $grid.Columns["character"].DefaultCellStyle.Font =
             New-Object System.Drawing.Font("Microsoft JhengHei UI", 14)
         $grid.Columns["score"].ReadOnly = $true
-        $grid.Columns["score"].FillWeight = 76
+        $grid.Columns["score"].FillWeight = 62
+
+        $leftLabel = New-Object System.Windows.Forms.Label
+        $leftLabel.Text = "依門檻會被隱藏的字（勾「保留」救回來）"
+        $leftLabel.Dock = "Top"
+        $leftLabel.Height = 22
+        $leftLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 66)
+
+        $activeGrid = New-Object System.Windows.Forms.DataGridView
+        $activeGrid.Dock = "Fill"
+        $activeGrid.AllowUserToAddRows = $false
+        $activeGrid.RowHeadersVisible = $false
+        $activeGrid.SelectionMode = "FullRowSelect"
+        $activeGrid.MultiSelect = $true
+        $activeGrid.AutoSizeColumnsMode = "Fill"
+        $activeGrid.ReadOnly = $true
+        $activeGrid.BackgroundColor = [System.Drawing.SystemColors]::Window
+        [void]$activeGrid.Columns.Add("character", "字")
+        [void]$activeGrid.Columns.Add("score", "字頻")
+        [void]$activeGrid.Columns.Add("reason", "原因")
+        $activeGrid.Columns["character"].FillWeight = 16
+        $activeGrid.Columns["character"].DefaultCellStyle.Font =
+            New-Object System.Drawing.Font("Microsoft JhengHei UI", 14)
+        $activeGrid.Columns["score"].FillWeight = 16
+        $activeGrid.Columns["reason"].FillWeight = 68
+
+        $rightLabel = New-Object System.Windows.Forms.Label
+        $rightLabel.Text = "目前實際被過濾掉的字"
+        $rightLabel.Dock = "Top"
+        $rightLabel.Height = 22
+        $rightLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 66)
+
+        $rescueButton = New-Object System.Windows.Forms.Button
+        $rescueButton.Text = "把選取的挑出來（不再過濾）"
+        $rescueButton.Dock = "Bottom"
+        $rescueButton.Height = 28
+
+        $split.Panel1.Controls.Add($grid)
+        $split.Panel1.Controls.Add($leftLabel)
+        $split.Panel2.Controls.Add($activeGrid)
+        $split.Panel2.Controls.Add($rescueButton)
+        $split.Panel2.Controls.Add($rightLabel)
 
         $hint = New-Object System.Windows.Forms.Label
         $hint.AutoSize = $true
@@ -268,6 +317,73 @@ $maximumThreshold = 20
                           "這裡只是隱藏，內建字典沒有被改。")
         }.GetNewClosure()
 
+        # 右側反映**已儲存**的設定，不是正在調的門檻。同樣的資料來源，同樣的
+        # 規則，只是套用的是存檔裡那個 floor。
+        #
+        # 存在 hashtable 裡而不是普通變數：每個 GetNewClosure 拿到的是自己那份
+        # 快照，套用鈕裡寫 $savedFloor = 7 只會改到套用鈕自己的那份，右邊永遠
+        # 看不到。hashtable 是參考型別，各閉包指向同一個物件，改得到。
+        $saved = @{ Floor = $settings.Floor }
+
+        $refreshActive = {
+            $activeGrid.Rows.Clear()
+            $floor = [int]$saved.Floor
+            $listed = New-Object System.Collections.Generic.HashSet[string]
+
+            # $hidable 是門檻那半邊的資料來源，讀不到就只是列不出門檻篩掉的字。
+            # 手動指定的隱藏字不靠它，所以不能在這裡整個 return——那會讓使用者
+            # 明明設了隱藏，右邊卻一片空白。
+            if ($null -ne $hidable) {
+                foreach ($entry in $hidable) {
+                    $character = [string]$entry.character
+                    if ($keepSet.Contains($character)) { continue }
+                    if ($floor -gt 0 -and $entry.score -lt $floor) {
+                        [void]$activeGrid.Rows.Add($character, $entry.score, "字頻 $($entry.score) 低於門檻 $floor")
+                        [void]$listed.Add($character)
+                    }
+                }
+            }
+            # 手動指定的隱藏字即使門檻沒碰到也照樣過濾，所以要補進來——但已經
+            # 因為門檻列過的就別列第二次。
+            foreach ($character in @($hiddenSet | Sort-Object)) {
+                if ($keepSet.Contains($character)) { continue }
+                if ($listed.Contains($character)) { continue }
+                $score = if ($frequency.ContainsKey($character)) { $frequency[$character] } else { "" }
+                [void]$activeGrid.Rows.Add($character, $score, "你指定隱藏")
+                [void]$listed.Add($character)
+            }
+
+            if ($listed.Count -gt 0) {
+                $rightLabel.Text = "目前實際被過濾掉的字：$($listed.Count) 個（已套用門檻 $floor）"
+            }
+            elseif ($floor -gt 0 -and $null -eq $hidable) {
+                $rightLabel.Text = "目前實際被過濾掉的字：列不出來（預覽資料讀不到，門檻仍然生效）"
+            }
+            else {
+                $rightLabel.Text = "目前實際被過濾掉的字：沒有（過濾未生效）"
+            }
+        }.GetNewClosure()
+
+        # 挑出來＝加進「一律保留」，那是唯一能勝過門檻的規則。
+        $rescueButton.Add_Click({
+            $picked = @()
+            foreach ($row in $activeGrid.SelectedRows) {
+                $character = [string]$row.Cells["character"].Value
+                if ($character) { $picked += $character }
+            }
+            if ($picked.Count -eq 0) {
+                $status.Text = "右邊沒有選取任何字"
+                return
+            }
+            foreach ($character in $picked) {
+                [void]$keepSet.Add($character)
+                [void]$hiddenSet.Remove($character)
+            }
+            & $refreshActive
+            & $refresh
+            $status.Text = "已挑出 $($picked.Count) 個字（$($picked -join '')），按套用才生效"
+        }.GetNewClosure())
+
         $threshold.Add_ValueChanged($refresh)
 
         $grid.Add_CellValueChanged({
@@ -291,8 +407,10 @@ $maximumThreshold = 20
         $applyButton.Add_Click({
             try {
                 & $writeSettings ([int]$threshold.Value) $hiddenSet $keepSet
+                $saved.Floor = [int]$threshold.Value
+                & $refreshActive
                 $result = & $Context.RestartPime $Context.LauncherPath
-                $status.Text = "已套用：門檻 $([int]$threshold.Value)，保留 $($keepSet.Count) 個。$($result.Message)"
+                $status.Text = "已套用：門檻 $($saved.Floor)，保留 $($keepSet.Count) 個。$($result.Message)"
             }
             catch {
                 $status.Text = "套用失敗：$($_.Exception.Message)"
@@ -303,6 +421,8 @@ $maximumThreshold = 20
             $threshold.Value = 0
             try {
                 & $writeSettings 0 $hiddenSet $keepSet
+                $saved.Floor = 0
+                & $refreshActive
                 $result = & $Context.RestartPime $Context.LauncherPath
                 $status.Text = "過濾已關閉，所有字都會回來。$($result.Message)"
             }
@@ -312,9 +432,10 @@ $maximumThreshold = 20
         }.GetNewClosure())
 
         & $refresh
+        & $refreshActive
 
         $layout.Controls.Add($top, 0, 0)
-        $layout.Controls.Add($grid, 0, 1)
+        $layout.Controls.Add($split, 0, 1)
         $layout.Controls.Add($hint, 0, 2)
         $layout.Controls.Add($bottom, 0, 3)
         $layout

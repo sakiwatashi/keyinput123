@@ -67,9 +67,17 @@
         [void]$buttons.Controls.Add($refreshButton)
         [void]$buttons.Controls.Add($folderButton)
 
-        # 預設開啟：只有明確的 enabled:false 會關閉，檔案不存在或損壞一律視為
-        # 開啟。這條規則必須與 bopomofo_core\candidate_ui_client.py 一致。
-        function Get-CandidateUiEnabled([string]$path) {
+        # 這兩個助手寫成**變數**而不是 function，$refresh 也一定要 GetNewClosure。
+        #
+        # 原本它們是 Build 裡的具名 function，$refresh 是普通 scriptblock。建構
+        # 當下一切正常，但按鈕按下去時 Build 這層函式作用域早就結束了，於是
+        # Add-Row、Get-CandidateUiEnabled 一個都找不到，連 $toggle 都是 null——
+        # 「重新整理」的實際效果是把表格清空然後什麼都填不回去。
+        # GetNewClosure 只複製**變數**，不複製 function，所以助手必須是變數。
+        $getCandidateUiEnabled = {
+            param([string]$path)
+            # 預設開啟：只有明確的 enabled:false 會關閉，檔案不存在或損壞一律
+            # 視為開啟。這條規則必須與 bopomofo_core\candidate_ui_client.py 一致。
             if (-not (Test-Path -LiteralPath $path)) { return $true }
             try {
                 $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -79,7 +87,8 @@
             catch { return $true }
         }
 
-        function Add-Row($state, $item, $detail) {
+        $addRow = {
+            param($state, $item, $detail)
             $index = $grid.Rows.Add($item, $state, $detail)
             $colour = switch ($state) {
                 "執行中" { [System.Drawing.Color]::FromArgb(0, 120, 60) }
@@ -89,22 +98,25 @@
                 default  { [System.Drawing.Color]::FromArgb(180, 30, 30) }
             }
             $grid.Rows[$index].Cells["state"].Style.ForeColor = $colour
-        }
+        }.GetNewClosure()
 
         $refresh = {
             $grid.Rows.Clear()
 
-            $launcher = Get-Process -Name "PIMELauncher" -ErrorAction SilentlyContinue
-            Add-Row $(if ($launcher) { "執行中" } else { "未執行" }) "PIMELauncher" `
+            # -ErrorAction Ignore 而不是 SilentlyContinue：兩者都不顯示，但
+            # SilentlyContinue 仍然把錯誤堆進 $Error。「沒在跑」在這一頁是正常
+            # 狀態，不該留下錯誤紀錄——按鈕測試正是以 $Error 的增量判斷成敗。
+            $launcher = Get-Process -Name "PIMELauncher" -ErrorAction Ignore
+            & $addRow $(if ($launcher) { "執行中" } else { "未執行" }) "PIMELauncher" `
                 $(if ($launcher) { "PID $($launcher.Id -join ', ')" } else { "輸入法不會被載入，先重啟 PIME" })
 
             # PIME 的 python 伺服器要等第一次打字才會起來，所以「未執行」不代表壞掉。
-            $server = Get-Process -Name "python" -ErrorAction SilentlyContinue
-            Add-Row $(if ($server) { "執行中" } else { "未啟動" }) "PIME python 伺服器" `
+            $server = Get-Process -Name "python" -ErrorAction Ignore
+            & $addRow $(if ($server) { "執行中" } else { "未啟動" }) "PIME python 伺服器" `
                 $(if ($server) { "PID $($server.Id -join ', ')" } else { "第一次打字才會啟動，尚未打字屬正常" })
 
-            $helper = Get-Process -Name "SmartPriorityCandidateUI" -ErrorAction SilentlyContinue
-            Add-Row $(if ($helper) { "執行中" } else { "未執行" }) "候選視窗輔助程式" `
+            $helper = Get-Process -Name "SmartPriorityCandidateUI" -ErrorAction Ignore
+            & $addRow $(if ($helper) { "執行中" } else { "未執行" }) "候選視窗輔助程式" `
                 $(if ($helper) { "PID $($helper.Id -join ', ')" } else { "候選視窗關閉時本來就不會執行" })
 
             if ($Context.ModuleRoot) {
@@ -117,23 +129,23 @@
                     }
                     catch { $version = "ime.json 無法解析" }
                 }
-                Add-Row "存在" "輸入法模組 $version" $Context.ModuleRoot
+                & $addRow "存在" "輸入法模組 $version" $Context.ModuleRoot
             }
             else {
-                Add-Row "找不到" "輸入法模組" "PIME 底下沒有 pinned_bopomofo，輸入法不會出現在切換清單"
+                & $addRow "找不到" "輸入法模組" "PIME 底下沒有 pinned_bopomofo，輸入法不會出現在切換清單"
             }
 
-            Add-Row $(if ($Context.PimeRoot) { "存在" } else { "找不到" }) "PIME 安裝位置" `
+            & $addRow $(if ($Context.PimeRoot) { "存在" } else { "找不到" }) "PIME 安裝位置" `
                 $(if ($Context.PimeRoot) { $Context.PimeRoot } else { "登錄檔沒有有效的 Software\PIME" })
 
-            $enabled = Get-CandidateUiEnabled $Context.CandidateUi
+            $enabled = & $getCandidateUiEnabled $Context.CandidateUi
             $source = if (Test-Path -LiteralPath $Context.CandidateUi) { $Context.CandidateUi } else { "偏好檔不存在（預設開啟）" }
-            Add-Row $(if ($enabled) { "啟用" } else { "關閉" }) "行程外候選視窗" $source
+            & $addRow $(if ($enabled) { "啟用" } else { "關閉" }) "行程外候選視窗" $source
             $toggle.Checked = $enabled
 
-            Add-Row $(if (Test-Path -LiteralPath $Context.StateRoot) { "存在" } else { "尚未建立" }) `
+            & $addRow $(if (Test-Path -LiteralPath $Context.StateRoot) { "存在" } else { "尚未建立" }) `
                 "個人資料夾" $Context.StateRoot
-        }
+        }.GetNewClosure()
 
         $applyButton.Add_Click({
             try {

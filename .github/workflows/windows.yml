@@ -52,6 +52,9 @@ jobs:
       - name: Test control panel shell, modules and keymap parity
         shell: powershell
         run: .\tests\control_panel_smoke.ps1
+      - name: Test candidate filter split panes
+        shell: powershell
+        run: .\tests\hidden_filter_panes_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1

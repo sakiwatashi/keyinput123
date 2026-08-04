@@ -22,6 +22,51 @@ Add-Type -AssemblyName System.Drawing
 
 $failures = New-Object System.Collections.Generic.List[string]
 
+# 按下去會跳對話框的按鈕會把測試整個卡住：MessageBox.Show 是同步的模態迴圈，
+# PerformClick 要等它關掉才會回來，而測試環境裡沒有人去按確定。所以自備一個
+# 看門狗，在模態迴圈跑起來的時候把對話框關掉，順便記下它的標題。
+#
+# 記標題不只是為了不卡住。使用者回報過「我啥都沒輸入按了一下就跳錯誤框」，
+# 那正是這支測試要抓的東西——所以標題帶「失敗」或「錯誤」的一律算失敗。
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class DialogWatch {
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr PostMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
+
+    public static string CloseFirstDialog() {
+        string caption = null;
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+            if (!IsWindowVisible(hWnd)) return true;
+            StringBuilder cls = new StringBuilder(64);
+            GetClassNameW(hWnd, cls, cls.Capacity);
+            if (cls.ToString() != "#32770") return true;   // #32770 = 標準對話框類別
+            StringBuilder text = new StringBuilder(512);
+            GetWindowTextW(hWnd, text, text.Capacity);
+            caption = text.ToString();
+            PostMessageW(hWnd, 0x0010, IntPtr.Zero, IntPtr.Zero);   // WM_CLOSE
+            return false;
+        }, IntPtr.Zero);
+        return caption;
+    }
+}
+"@
+
+# 每次按鈕都用它包起來：先武裝看門狗，按下去，再解除。
+$script:dialogSeen = $null
+$watchdog = New-Object System.Windows.Forms.Timer
+$watchdog.Interval = 250
+$watchdog.Add_Tick({
+    $caption = [DialogWatch]::CloseFirstDialog()
+    if ($caption) { $script:dialogSeen = $caption }
+})
+
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("panel-buttons-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
 try {
@@ -52,18 +97,33 @@ try {
         return $found
     }
 
+    # 先確認 PerformClick 在這個環境下真的會叫到處理程序。
+    #
+    # 這一段不是多餘的：本測試原本把每個分頁掛到一個沒有 Show 過的 Form 底下，
+    # 而 Button.PerformClick 會先問 CanSelect，CanSelect 往上走訪父控制項時碰到
+    # Visible=false 的 Form 就回傳 false，PerformClick 於是靜靜地什麼也不做。
+    # 測試照樣「通過」，但一個處理程序都沒執行過。空轉的測試比沒有測試更糟，
+    # 所以現在每次都先驗一次自己。
+    $probeFired = $false
+    $probe = New-Object System.Windows.Forms.Button
+    $probe.Add_Click({ $script:probeFired = $true })
+    $probe.PerformClick()
+    if (-not $probeFired) {
+        $failures.Add("PerformClick 沒有觸發處理程序，這支測試等於空轉（請檢查控制項是否掛在未顯示的 Form 底下）")
+    }
+
     $clicked = 0
     foreach ($file in Get-ChildItem -LiteralPath $moduleDirectory -Filter *.ps1 -File | Sort-Object Name) {
         $definition = & $file.FullName
         if ($definition -is [array]) { $definition = $definition[-1] }
 
-        $holder = New-Object System.Windows.Forms.Form
         try {
+            # 不掛 Form：見上面 probe 的說明。無父控制項時 Visible 預設為 true，
+            # 按鈕才按得動。
             $control = & $definition.Build $context
             if (-not $control) { continue }
-            $holder.Controls.Add($control)
 
-            foreach ($button in (Get-Buttons $holder)) {
+            foreach ($button in (Get-Buttons $control)) {
                 $label = "$($definition.Name) / $($button.Text)"
                 # PerformClick 不會把錯誤往外拋：PowerShell 的事件處理程序
                 # 把例外寫進錯誤串流，WinForms 再自己彈出對話框。第一版用
@@ -72,10 +132,15 @@ try {
                 $before = $Error.Count
                 # 空狀態下按。使用者第一次打開面板看到的就是這個狀態，
                 # 而那正是回報發生的時機。
-                $button.PerformClick()
+                $script:dialogSeen = $null
+                $watchdog.Start()
+                try { $button.PerformClick() } finally { $watchdog.Stop() }
                 $clicked++
                 if ($Error.Count -gt $before) {
                     $failures.Add("$label -> $($Error[0].Exception.Message)")
+                }
+                if ($script:dialogSeen -and $script:dialogSeen -match "失敗|錯誤") {
+                    $failures.Add("$label -> 跳出錯誤對話框「$script:dialogSeen」")
                 }
             }
         }
@@ -83,9 +148,11 @@ try {
             $failures.Add("$($file.Name) 建構失敗 -> $($_.Exception.Message)")
         }
         finally {
-            $holder.Dispose()
+            if ($control) { $control.Dispose() }
         }
     }
+
+    $watchdog.Dispose()
 
     if ($clicked -lt 8) {
         $failures.Add("只按到 $clicked 個按鈕，控制項走訪可能沒有深入分頁")

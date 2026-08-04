@@ -35,7 +35,7 @@ function Restart-Pime {
         # 已經沒在跑也算數，繼續往下啟動。
     }
     $deadline = (Get-Date).AddSeconds(5)
-    while ((Get-Date) -lt $deadline -and (Get-Process -Name PIMELauncher -ErrorAction SilentlyContinue)) {
+    while ((Get-Date) -lt $deadline -and (Get-Process -Name PIMELauncher -ErrorAction Ignore)) {
         Start-Sleep -Milliseconds 200
     }
 
