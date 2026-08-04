@@ -18,6 +18,7 @@ from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.keymap import symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
+from .bopomofo_core.usage_store import UsageStore
 from .bopomofo_core.phrase_store import (
     MAX_PHRASE_LENGTH,
     MIN_PHRASE_LENGTH,
@@ -145,6 +146,11 @@ class PinnedBopomofoTextService(TextService):
         provider = LibChewingProvider(pinned_libchewing)
         self.session = CandidateSession(provider, PinnedStore(pin_path))
         self.phrase_store = PhraseStore(phrase_path)
+        # 使用次數獨立存放。統計檔壞掉或不見只損失統計，phrases.json 那 288 筆
+        # 不可取代的資料完全不受影響——這是刻意不改主檔格式的理由。
+        self.usage_store = UsageStore(
+            os.path.join(appdata, "PinnedBopomofo", "usage.json")
+        )
         self.feedback_store = FeedbackStore(feedback_path)
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
@@ -294,6 +300,19 @@ class PinnedBopomofoTextService(TextService):
             # input method from loading; the fallback still works there.
             pass
 
+    def setCommitString(self, text):
+        """所有送出的文字都經過這裡，所以計數只需要掛這一個點。
+
+        程式裡有四處呼叫它（一般提交、直接送出注音、單一候選、游標插入），
+        在四處各插一行計數，遲早會漏掉新增的第五處。
+        """
+        try:
+            self.usage_store.record(text)
+        except Exception:
+            # 統計絕不能擋住送字。壞掉就安靜跳過。
+            pass
+        return super().setCommitString(text)
+
     def onDeactivate(self):
         # A persistent Shift toggle is useful inside the current field, but a
         # newly focused field should always begin in Bopomofo mode.
@@ -304,6 +323,12 @@ class PinnedBopomofoTextService(TextService):
         # goes away would strand it over an unrelated application.
         try:
             self.candidate_ui.hide()
+        except Exception:
+            pass
+        # Usage counts are buffered, so the last few commits are still only in
+        # memory when the profile goes away. Write them out here.
+        try:
+            self.usage_store.flush()
         except Exception:
             pass
 

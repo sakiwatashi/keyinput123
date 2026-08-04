@@ -287,6 +287,190 @@ $readJsonObject = {
         [void]$tabs.TabPages.Add((New-LexiconPage "學到的詞（phrases.json）" $Context.PhrasesPath "詞語" $false))
         [void]$tabs.TabPages.Add((New-LexiconPage "排名鎖定（pins.json）" $Context.PinsPath "候選（空白分隔，最前面優先）" $true))
 
+        # ---- 第三頁：使用統計 ----------------------------------------------
+        #
+        # 詞庫只收多字詞，所以單字永遠是 0——「最常用」不能從 phrases.json 算。
+        # 統計來自 usage.json，記錄的是**實際送出過什麼**，單字也算。排名規則
+        # 交給 Python，PowerShell 不重寫一份，兩邊才不會各說各話。
+        $statsPage = New-Object System.Windows.Forms.TabPage
+        $statsPage.Text = "使用統計"
+        $statsPage.UseVisualStyleBackColor = $true
+        $statsPage.Padding = New-Object System.Windows.Forms.Padding(6)
+
+        $statsLayout = New-Object System.Windows.Forms.TableLayoutPanel
+        $statsLayout.Dock = "Fill"
+        $statsLayout.ColumnCount = 1
+        $statsLayout.RowCount = 3
+        [void]$statsLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+        [void]$statsLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
+        [void]$statsLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+
+        $statsTop = New-Object System.Windows.Forms.FlowLayoutPanel
+        $statsTop.Dock = "Fill"
+        $statsTop.AutoSize = $true
+        $statsTop.WrapContents = $false
+
+        $statsSummary = New-Object System.Windows.Forms.Label
+        $statsSummary.AutoSize = $true
+        $statsSummary.Margin = New-Object System.Windows.Forms.Padding(4, 9, 12, 4)
+
+        $statsReload = New-Object System.Windows.Forms.Button
+        $statsReload.Text = "重新整理"
+        $statsReload.Width = 100
+        $statsReload.Height = 28
+        $statsReload.Margin = New-Object System.Windows.Forms.Padding(4)
+
+        [void]$statsTop.Controls.Add($statsSummary)
+        [void]$statsTop.Controls.Add($statsReload)
+
+        $statsSplit = New-Object System.Windows.Forms.SplitContainer
+        $statsSplit.Dock = "Fill"
+        $statsSplit.Orientation = "Vertical"
+        $statsSplit.SplitterWidth = 8
+
+        $lengthGrid = New-Object System.Windows.Forms.DataGridView
+        $lengthGrid.Dock = "Fill"
+        $lengthGrid.AllowUserToAddRows = $false
+        $lengthGrid.RowHeadersVisible = $false
+        $lengthGrid.ReadOnly = $true
+        $lengthGrid.SelectionMode = "FullRowSelect"
+        $lengthGrid.AutoSizeColumnsMode = "Fill"
+        $lengthGrid.BackgroundColor = [System.Drawing.SystemColors]::Window
+        [void]$lengthGrid.Columns.Add("length", "字數")
+        [void]$lengthGrid.Columns.Add("distinct", "不同的詞")
+        [void]$lengthGrid.Columns.Add("commits", "送出次數")
+
+        $lengthLabel = New-Object System.Windows.Forms.Label
+        $lengthLabel.Text = "依字數統計（點一列可只看那個長度）"
+        $lengthLabel.Dock = "Top"
+        $lengthLabel.Height = 22
+        $lengthLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 66)
+
+        $topGrid = New-Object System.Windows.Forms.DataGridView
+        $topGrid.Dock = "Fill"
+        $topGrid.AllowUserToAddRows = $false
+        $topGrid.RowHeadersVisible = $false
+        $topGrid.ReadOnly = $true
+        $topGrid.SelectionMode = "FullRowSelect"
+        $topGrid.AutoSizeColumnsMode = "Fill"
+        $topGrid.BackgroundColor = [System.Drawing.SystemColors]::Window
+        [void]$topGrid.Columns.Add("text", "詞")
+        [void]$topGrid.Columns.Add("count", "次數")
+        [void]$topGrid.Columns.Add("last", "最後使用")
+        $topGrid.Columns["text"].FillWeight = 40
+        $topGrid.Columns["text"].DefaultCellStyle.Font =
+            New-Object System.Drawing.Font("Microsoft JhengHei UI", 12)
+        $topGrid.Columns["count"].FillWeight = 20
+        $topGrid.Columns["last"].FillWeight = 40
+
+        $topLabel = New-Object System.Windows.Forms.Label
+        $topLabel.Text = "最常用"
+        $topLabel.Dock = "Top"
+        $topLabel.Height = 22
+        $topLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 66)
+
+        $statsSplit.Panel1.Controls.Add($lengthGrid)
+        $statsSplit.Panel1.Controls.Add($lengthLabel)
+        $statsSplit.Panel2.Controls.Add($topGrid)
+        $statsSplit.Panel2.Controls.Add($topLabel)
+
+        $statsHint = New-Object System.Windows.Forms.Label
+        $statsHint.AutoSize = $true
+        $statsHint.MaximumSize = New-Object System.Drawing.Size(880, 0)
+        $statsHint.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+        $statsHint.Margin = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
+
+        $statsLayout.Controls.Add($statsTop, 0, 0)
+        $statsLayout.Controls.Add($statsSplit, 0, 1)
+        $statsLayout.Controls.Add($statsHint, 0, 2)
+        $statsPage.Controls.Add($statsLayout)
+
+        # 資料放 hashtable：篩選長度時要能改到閉包看得見的那一份。純量做不到，
+        # GetNewClosure 給每個閉包自己的快照——這個陷阱在這個控制台咬過五次。
+        $stats = @{ Data = $null; Error = $null; Length = $null }
+
+        $loadStats = {
+            $stats.Data = $null
+            $stats.Error = $null
+            $python = if ($Context.PimeRoot) {
+                $candidate = Join-Path $Context.PimeRoot (Join-Path "python" (Join-Path "python3" "python.exe"))
+                if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+            } else { $null }
+            $reporter = if ($Context.ModuleRoot) {
+                $candidate = Join-Path $Context.ModuleRoot "usage_stats.py"
+                if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+            } else { $null }
+            if (-not $python) { $stats.Error = "找不到 PIME 的 Python"; return }
+            if (-not $reporter) { $stats.Error = "找不到 usage_stats.py，請重新安裝"; return }
+            try {
+                $raw = (& $python $reporter 200 2>&1 | Out-String)
+                if ($LASTEXITCODE -ne 0) {
+                    $stats.Error = "usage_stats.py 結束碼 $LASTEXITCODE：$($raw.Trim())"
+                    return
+                }
+                $stats.Data = $raw | ConvertFrom-Json
+            }
+            catch { $stats.Error = "執行 usage_stats.py 失敗：$($_.Exception.Message)" }
+        }.GetNewClosure()
+
+        $renderStats = {
+            $lengthGrid.Rows.Clear()
+            $topGrid.Rows.Clear()
+
+            if ($null -eq $stats.Data) {
+                $statsSummary.Text = "讀不到使用統計"
+                $statsHint.Text = [string]$stats.Error
+                return
+            }
+
+            $data = $stats.Data
+            if ([int]$data.tracked -eq 0) {
+                $statsSummary.Text = "還沒有任何統計"
+                $statsHint.Text = ("使用次數從安裝這版之後才開始記錄，之前打過的字沒有回溯資料——" +
+                                   "打一陣子再回來看。統計存在 usage.json，跟詞庫分開放：它壞掉或" +
+                                   "不見只損失統計，你的詞庫完全不受影響。")
+                return
+            }
+
+            foreach ($row in @($data.by_length)) {
+                [void]$lengthGrid.Rows.Add([int]$row.length, [int]$row.distinct, [int]$row.commits)
+            }
+
+            $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+            foreach ($row in @($data.most_used)) {
+                $text = [string]$row.text
+                if ($null -ne $stats.Length -and $text.Length -ne [int]$stats.Length) { continue }
+                $when = if ([int64]$row.last -gt 0) {
+                    $epoch.AddSeconds([int64]$row.last).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                } else { "" }
+                [void]$topGrid.Rows.Add($text, [int]$row.count, $when)
+            }
+
+            $scope = if ($null -eq $stats.Length) { "全部" } else { "$($stats.Length) 字" }
+            $topLabel.Text = "最常用（$scope）"
+            $statsSummary.Text = "$([int]$data.tracked) 個不同的詞，共送出 $([int]$data.commits) 次"
+            $statsHint.Text = ("統計記錄的是實際送出過什麼，所以單字也算得到——詞庫只收多字詞，" +
+                               "用它算不出單字。點左邊某一列可只看那個字數，再點一次取消。" +
+                               "這些資料只存在本機。")
+        }.GetNewClosure()
+
+        $lengthGrid.Add_SelectionChanged({
+            if ($lengthGrid.SelectedRows.Count -eq 0) { return }
+            $picked = [int]$lengthGrid.SelectedRows[0].Cells["length"].Value
+            $stats.Length = if ($stats.Length -eq $picked) { $null } else { $picked }
+            & $renderStats
+        }.GetNewClosure())
+
+        $statsReload.Add_Click({
+            & $loadStats
+            & $renderStats
+        }.GetNewClosure())
+
+        & $loadStats
+        & $renderStats
+
+        [void]$tabs.TabPages.Add($statsPage)
+
         $host_ = New-Object System.Windows.Forms.TableLayoutPanel
         $host_.Dock = "Fill"
         $host_.ColumnCount = 1

@@ -32,6 +32,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\pinned_bopomofo_ime.
 Copy-Item -LiteralPath (Join-Path $projectRoot "feedback-report.ps1") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "prune_phrases.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "list_hidden.py") -Destination $moduleRoot -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "usage_stats.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "control_panel") -Destination $moduleRoot -Recurse -Force
 # 健康檢查要跟著模組一起裝，控制台的按鈕才叫得到它——那顆鈕存在的意義正是
 # 「輸入法壞掉時」還能用，所以它不能依賴原始碼樹還在。
