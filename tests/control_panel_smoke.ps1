@@ -64,11 +64,24 @@ for node in tree.body:
             code, shift = key.elts
             code = constants[code.id] if isinstance(code, ast.Name) else code.value
             ctrl["%d|%s" % (code, shift.value)] = value.value
-print(json.dumps({"bopomofo": KEY_TO_SYMBOL, "ctrl": ctrl}, ensure_ascii=False))
+# 寫檔而不是 print。注音符號經過 stdout 時要看主控台的字碼頁臉色：GitHub
+# runner 上 Python 的 stdout 是 cp1252，遇到 ㄅ（U+3105）直接 UnicodeEncodeError，
+# 輸出變成空的，比對就報「UI 41 筆、Python 0 筆」。本機主控台是中文環境所以
+# 一路都過，只有 CI 會紅——這種只在別的機器上失敗的測試最難查。
+# 指定 encoding 寫檔，結果就跟執行環境無關。
+out = sys.argv[2]
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump({"bopomofo": KEY_TO_SYMBOL, "ctrl": ctrl}, handle, ensure_ascii=False)
 '@ | Set-Content -LiteralPath $extractor -Encoding UTF8
 
-    $dump = & $python.Source $extractor $root | ConvertFrom-Json
+    $dumpPath = Join-Path $env:TEMP "control_panel_keymap_dump.json"
+    & $python.Source $extractor $root $dumpPath | Out-Null
+    if (-not (Test-Path -LiteralPath $dumpPath)) {
+        throw "按鍵表匯出失敗：$extractor 沒有產生 $dumpPath"
+    }
+    $dump = [IO.File]::ReadAllText($dumpPath, [Text.UTF8Encoding]::new($false)) | ConvertFrom-Json
     Remove-Item -LiteralPath $extractor -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $dumpPath -Force -ErrorAction SilentlyContinue
 
     # 虛擬鍵碼 → 鍵面字元，與對照表模組畫在鍵盤上的位置對應。
     $vkToKey = @{
