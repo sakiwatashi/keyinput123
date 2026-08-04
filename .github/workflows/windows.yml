@@ -58,6 +58,9 @@ jobs:
       - name: Test health check detects a broken install
         shell: powershell
         run: .\tests\health_check_smoke.ps1
+      - name: Test user data backup rotates and restores
+        shell: powershell
+        run: .\tests\backup_user_data_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1

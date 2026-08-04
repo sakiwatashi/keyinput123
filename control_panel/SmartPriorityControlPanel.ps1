@@ -94,6 +94,28 @@ function New-SmartPriorityContext {
     }
 }
 
+function Start-SmartPriorityBackup {
+    <#
+        .SYNOPSIS
+        開啟控制台時順手備份一次個人資料。
+
+        永遠不要讓備份擋住控制台開啟：這裡整段包在 try/catch 裡，失敗就安靜
+        跳過。控制台是「輸入法壞掉時」的求救入口，它自己一定要開得起來。
+
+        備份工具本身在內容沒變時不會產生新檔，所以開一百次控制台不會塞出
+        一百份一樣的壓縮檔。
+    #>
+    param([string]$ModuleRoot)
+
+    try {
+        if (-not $ModuleRoot) { return }
+        $tool = Join-Path $ModuleRoot (Join-Path "tools" "backup_user_data.ps1")
+        if (-not (Test-Path -LiteralPath $tool)) { return }
+        & $tool | Out-Null
+    }
+    catch { }
+}
+
 function New-SmartPriorityErrorPanel {
     param([string]$Title, [string]$Detail)
 
@@ -142,6 +164,10 @@ function Get-SmartPriorityModule {
 }
 
 $context = New-SmartPriorityContext
+
+# 開啟控制台就順手備份一次。使用者會來開控制台，通常正是「要動設定」或
+# 「出事了」的時候——兩者都是最值得先留一份的時機。
+Start-SmartPriorityBackup -ModuleRoot $context.ModuleRoot
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "智慧優先注音 控制台"

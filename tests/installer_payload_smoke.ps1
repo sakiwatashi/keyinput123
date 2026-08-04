@@ -53,8 +53,21 @@ if ($missing.Count -gt 0) {
 # slip while editing install.ps1 turned "WindowsPowerShell1.0" into a vertical
 # tab, so the Start-menu shortcut refused the target and the whole install
 # aborted with a bare exit code 1. Nothing else here reaches shortcut creation.
+#
+# 掃描範圍不只 installer\：build 腳本與 tools\ 也會寫死路徑，而且已經中過招
+# ——"toolsackup_user_data.ps1" 的  被吃成退格字元，變成 toolsackup_...，
+# 建置直接失敗。凡是有反斜線路徑字面值的腳本都要納入。
 $corrupt = @()
-foreach ($script in Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File) {
+$scanTargets = @(Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File)
+foreach ($extra in @("build_pime_overlay.ps1", "build_release.ps1", "install.ps1")) {
+    $path = Join-Path (Split-Path -Parent $installerRoot) $extra
+    if (Test-Path -LiteralPath $path) { $scanTargets += Get-Item -LiteralPath $path }
+}
+$toolsRoot = Join-Path (Split-Path -Parent $installerRoot) "tools"
+if (Test-Path -LiteralPath $toolsRoot) {
+    $scanTargets += Get-ChildItem -LiteralPath $toolsRoot -Filter *.ps1 -File
+}
+foreach ($script in $scanTargets) {
     $text = [IO.File]::ReadAllText($script.FullName)
     for ($index = 0; $index -lt $text.Length; $index++) {
         $code = [int][char]$text[$index]
@@ -71,7 +84,7 @@ if ($corrupt.Count -gt 0) {
 # The broken shortcut target was still a syntactically valid string; only
 # resolving it revealed the damage.
 $unresolved = @()
-foreach ($script in Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File) {
+foreach ($script in $scanTargets) {
     $text = [IO.File]::ReadAllText($script.FullName)
     foreach ($match in [regex]::Matches($text, 'Join-Path\s+\$env:WINDIR\s+"([^"]+)"')) {
         $candidate = Join-Path $env:WINDIR $match.Groups[1].Value

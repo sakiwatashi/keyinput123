@@ -133,6 +133,20 @@ $readJsonObject = {
             $pruneButton.Margin = New-Object System.Windows.Forms.Padding(4)
             $pruneButton.Visible = -not $valueIsList
 
+            # 備份鈕放在這一頁，因為這裡才是唯一不可取代的資料。輸入法本體、
+            # DLL、詞庫索引都能重裝，這些不能。
+            $backupButton = New-Object System.Windows.Forms.Button
+            $backupButton.Text = "立即備份"
+            $backupButton.Width = 110
+            $backupButton.Height = 30
+            $backupButton.Margin = New-Object System.Windows.Forms.Padding(4)
+
+            $backupFolderButton = New-Object System.Windows.Forms.Button
+            $backupFolderButton.Text = "開啟備份資料夾"
+            $backupFolderButton.Width = 140
+            $backupFolderButton.Height = 30
+            $backupFolderButton.Margin = New-Object System.Windows.Forms.Padding(4)
+
             $status = New-Object System.Windows.Forms.Label
             $status.AutoSize = $true
             $status.Margin = New-Object System.Windows.Forms.Padding(12, 10, 4, 4)
@@ -142,7 +156,33 @@ $readJsonObject = {
             [void]$bottom.Controls.Add($saveButton)
             [void]$bottom.Controls.Add($reloadButton)
             [void]$bottom.Controls.Add($pruneButton)
+            [void]$bottom.Controls.Add($backupButton)
+            [void]$bottom.Controls.Add($backupFolderButton)
             [void]$bottom.Controls.Add($status)
+
+            # 備份工具跟模組一起安裝，控制台才叫得到它。
+            $backupTool = if ($Context.ModuleRoot) {
+                Join-Path $Context.ModuleRoot (Join-Path "tools" "backup_user_data.ps1")
+            } else { $null }
+            $backupRoot = Join-Path $env:LOCALAPPDATA "PinnedBopomofoackups"
+
+            $backupButton.Add_Click({
+                if (-not $backupTool -or -not (Test-Path -LiteralPath $backupTool)) {
+                    $status.Text = "找不到備份工具，請重新安裝"
+                    return
+                }
+                try {
+                    # -Force：使用者是明確按了「立即備份」，就算內容沒變也給他一份。
+                    $output = (& $backupTool -Force 2>&1 | Out-String)
+                    $status.Text = ($output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+                }
+                catch { $status.Text = "備份失敗：$($_.Exception.Message)" }
+            }.GetNewClosure())
+
+            $backupFolderButton.Add_Click({
+                New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+                Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $backupRoot + '"') | Out-Null
+            }.GetNewClosure())
 
             $entries = New-Object System.Collections.Specialized.OrderedDictionary
 
