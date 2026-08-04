@@ -36,6 +36,9 @@ Run after every behavior change:
 ```powershell
 python -m unittest discover -s tests -v
 ./tests/json_encoding_smoke.ps1
+./tests/control_panel_buttons_smoke.ps1
+./tests/control_panel_smoke.ps1
+./tests/hidden_filter_panes_smoke.ps1
 ./build_pime_overlay.ps1
 ```
 
@@ -45,6 +48,41 @@ When PIME is installed, also run:
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' ./tests/pime_adapter_smoke.py
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' ./tests/pime_all_readings_audit.py
 ```
+
+## WinForms panel traps (all of these have already shipped bugs)
+
+**`GetNewClosure()` copies variables, not functions, and only the immediate
+scope.** A named `function` declared inside `Build` is gone by the time a button
+is clicked -- `Build`'s scope has returned. The status page's Refresh button
+silently cleared its own table this way for several releases. Helpers that a
+handler needs must be scriptblock *variables*, and the handler must be
+`.GetNewClosure()`d.
+
+**A closure captures a snapshot, so a scalar cannot be written back.** Assigning
+`$floor = 7` inside one handler does not change what another closure sees; each
+holds its own copy. Share mutable state through a hashtable or a real object --
+`$saved = @{ Floor = 0 }` -- because the reference is what gets copied.
+
+**`Button.PerformClick()` does nothing if the control sits under a `Form` that
+was never shown.** `PerformClick` checks `CanSelect`, which walks the parent
+chain and fails on the unshown Form's `Visible = false`. The button smoke test
+parented every page to a hidden Form and therefore executed no handler at all
+while reporting PASS. Tests must exercise the control without a Form parent, and
+must verify up front that clicking works at all.
+
+**A modal `MessageBox` will hang a test forever.** Nobody is there to press OK.
+`control_panel_buttons_smoke.ps1` arms a watchdog that closes the dialog and
+records its caption; a caption containing failure wording counts as a failure,
+which is exactly the defect a user once reported by hand.
+
+**Do not use `-ErrorAction SilentlyContinue` for an expected-absent process.** It
+hides the message but still appends to `$Error`, and the button test uses the
+`$Error` delta as its pass signal. Use `-ErrorAction Ignore`.
+
+**Never name a local `$input`** (or `$args`, `$error`, `$host`...). Inside a
+handler dispatched from a message loop, PowerShell's automatic variable shadows
+it and the local reads as `$null`. Static check lives in
+`control_panel_buttons_smoke.ps1`.
 
 ## Protected interaction contracts
 
