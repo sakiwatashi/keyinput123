@@ -98,17 +98,55 @@ $maximumThreshold = 20
         # 一般區域變數，不用 $script:。GetNewClosure 捕捉的是「呼叫它時那一層」
         # 的變數，$script: 指的是模組檔的腳本作用域，閉包裡拿到的會是 $null——
         # 這個陷阱在這個控制台已經咬過三次。
-        $hidable = $null
-        $protectedScores = @()
-        if ($python -and $lister) {
+        # 放在 hashtable 裡：重新載入鈕要能改到閉包看得見的那一份，純量做不到
+        # （GetNewClosure 給每個閉包自己的快照）。
+        $data = @{ Hidable = $null; Protected = @(); Error = $null }
+
+        # 失敗原因要分得出來。原本三種情況共用一句「找不到 python 或
+        # list_hidden.py」，於是「明明都在卻仍然空白」時完全無從查起——實測
+        # 就是被這句話誤導去查了不存在的路徑問題。
+        $loadHidable = {
+            $data.Hidable = $null
+            $data.Protected = @()
+            $data.Error = $null
+
+            # 訊息裡要帶路徑，但 PimeRoot/ModuleRoot 本來就可能是 null——
+            # Join-Path 收到空字串會丟例外，於是「回報找不到」這件事自己先炸掉。
+            # 錯誤處理路徑上的 null 正是這一類 bug 最愛躲的地方。
+            if (-not $python) {
+                $data.Error = if ($Context.PimeRoot) {
+                    "找不到 PIME 的 Python：" + (Join-Path $Context.PimeRoot "python\python3\python.exe")
+                } else {
+                    "找不到 PIME 安裝位置（登錄檔 Software\PIME 沒有有效路徑）"
+                }
+                return
+            }
+            if (-not $lister) {
+                $data.Error = if ($Context.ModuleRoot) {
+                    "找不到 list_hidden.py：" + (Join-Path $Context.ModuleRoot "list_hidden.py")
+                } else {
+                    "找不到輸入法模組（PIME 底下沒有 pinned_bopomofo）"
+                }
+                return
+            }
             try {
                 # 高門檻＝叫出全部，因為「是否受保護」與門檻無關。
-                $everything = & $python $lister 100000 2>$null | ConvertFrom-Json
-                $hidable = @($everything.hidden)
-                $protectedScores = @($everything.protected_scores)
+                # stderr 併進來一起看：出事時那才是有用的那一半。
+                $raw = (& $python $lister 100000 2>&1 | Out-String)
+                if ($LASTEXITCODE -ne 0) {
+                    $data.Error = "list_hidden.py 結束碼 $LASTEXITCODE：$($raw.Trim())"
+                    return
+                }
+                $everything = $raw | ConvertFrom-Json
+                $data.Hidable = @($everything.hidden)
+                $data.Protected = @($everything.protected_scores)
             }
-            catch { $hidable = $null }
-        }
+            catch {
+                $data.Error = "執行 list_hidden.py 失敗：$($_.Exception.Message)"
+            }
+        }.GetNewClosure()
+
+        & $loadHidable
 
         $settings = & $readSettings
         $keepSet = $settings.Keep
@@ -252,6 +290,14 @@ $maximumThreshold = 20
         $offButton.Height = 30
         $offButton.Margin = New-Object System.Windows.Forms.Padding(4)
 
+        # 預覽清單原本只在開頁時抓一次，失敗就永久空白——使用者不管怎麼調門檻
+        # 都看不到東西，唯一的出路是關掉整個控制台重開。有這顆鈕就地重試。
+        $reloadButton = New-Object System.Windows.Forms.Button
+        $reloadButton.Text = "重新載入清單"
+        $reloadButton.Width = 120
+        $reloadButton.Height = 30
+        $reloadButton.Margin = New-Object System.Windows.Forms.Padding(4)
+
         $status = New-Object System.Windows.Forms.Label
         $status.AutoSize = $true
         $status.Margin = New-Object System.Windows.Forms.Padding(12, 10, 4, 4)
@@ -259,6 +305,7 @@ $maximumThreshold = 20
 
         [void]$bottom.Controls.Add($applyButton)
         [void]$bottom.Controls.Add($offButton)
+        [void]$bottom.Controls.Add($reloadButton)
         [void]$bottom.Controls.Add($status)
 
         # ---- 列出低於門檻的字 ----------------------------------------------
@@ -279,9 +326,9 @@ $maximumThreshold = 20
                 return
             }
 
-            if ($null -eq $hidable) {
+            if ($null -eq $data.Hidable) {
                 $summary.Text = "算不出實際會隱藏哪些字"
-                $hint.Text = "找不到 PIME 的 Python 或 list_hidden.py，無法預覽。門檻仍然會生效。"
+                $hint.Text = "$($data.Error)`r`n門檻仍然會生效，只是這裡列不出會被隱藏哪些字。修好之後按「重新載入清單」即可，不必關掉控制台。"
                 return
             }
 
@@ -289,8 +336,8 @@ $maximumThreshold = 20
             # Python（啟動加讀 2 MB 索引），從 0 按到 7 就是七次，UI 整個卡住，
             # 看起來就像按鈕壞掉。判斷規則仍然只有 Python 那一份：這裡篩的是
             # 它算出來、已經排除掉受保護字的集合，所以套任何門檻都仍然正確。
-            $matching = @($hidable | Where-Object { $_.score -lt $cut })
-            $protectedBelow = @($protectedScores | Where-Object { $_ -lt $cut }).Count
+            $matching = @($data.Hidable | Where-Object { $_.score -lt $cut })
+            $protectedBelow = @($data.Protected | Where-Object { $_ -lt $cut }).Count
             $report = [pscustomobject]@{
                 hidden    = $matching
                 protected = $protectedBelow
@@ -305,7 +352,7 @@ $maximumThreshold = 20
                         [System.Drawing.Color]::FromArgb(0, 120, 60)
                 }
             }
-            $total = if ($hidable) { $hidable.Count } else { 0 }
+            $total = if ($data.Hidable) { $data.Hidable.Count } else { 0 }
             $summary.Text = ("會隱藏 $($report.hidden.Count) 個字（可隱藏的總共 $total 個）" +
                              "　低於門檻的有 $($report.below) 個，其中 $($report.protected) 個因為出現在內建詞庫而保留")
             $hint.Text = ("由上而下是最接近門檻的字，最需要看一眼；想留下的勾「保留」。`r`n" +
@@ -330,11 +377,11 @@ $maximumThreshold = 20
             $floor = [int]$saved.Floor
             $listed = New-Object System.Collections.Generic.HashSet[string]
 
-            # $hidable 是門檻那半邊的資料來源，讀不到就只是列不出門檻篩掉的字。
+            # $data.Hidable 是門檻那半邊的資料來源，讀不到就只是列不出門檻篩掉的字。
             # 手動指定的隱藏字不靠它，所以不能在這裡整個 return——那會讓使用者
             # 明明設了隱藏，右邊卻一片空白。
-            if ($null -ne $hidable) {
-                foreach ($entry in $hidable) {
+            if ($null -ne $data.Hidable) {
+                foreach ($entry in $data.Hidable) {
                     $character = [string]$entry.character
                     if ($keepSet.Contains($character)) { continue }
                     if ($floor -gt 0 -and $entry.score -lt $floor) {
@@ -356,7 +403,7 @@ $maximumThreshold = 20
             if ($listed.Count -gt 0) {
                 $rightLabel.Text = "目前實際被過濾掉的字：$($listed.Count) 個（已套用門檻 $floor）"
             }
-            elseif ($floor -gt 0 -and $null -eq $hidable) {
+            elseif ($floor -gt 0 -and $null -eq $data.Hidable) {
                 $rightLabel.Text = "目前實際被過濾掉的字：列不出來（預覽資料讀不到，門檻仍然生效）"
             }
             else {
@@ -382,6 +429,17 @@ $maximumThreshold = 20
             & $refreshActive
             & $refresh
             $status.Text = "已挑出 $($picked.Count) 個字（$($picked -join '')），按套用才生效"
+        }.GetNewClosure())
+
+        $reloadButton.Add_Click({
+            & $loadHidable
+            & $refresh
+            & $refreshActive
+            $status.Text = if ($null -eq $data.Hidable) {
+                "重新載入失敗：$($data.Error)"
+            } else {
+                "已重新載入，可隱藏的字共 $($data.Hidable.Count) 個"
+            }
         }.GetNewClosure())
 
         $threshold.Add_ValueChanged($refresh)

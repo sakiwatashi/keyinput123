@@ -112,6 +112,28 @@ try {
         $failures.Add("PerformClick 沒有觸發處理程序，這支測試等於空轉（請檢查控制項是否掛在未顯示的 Form 底下）")
     }
 
+    # 攔截 Start-Process，不要讓測試在使用者桌面上開視窗。
+    #
+    # 狀態頁的「開啟資料夾」會叫 explorer 開 $Context.StateRoot，而那是測試的
+    # 暫存沙箱；測試結束刪掉沙箱之後，那個 Explorer 視窗就跳「位置無法使用」。
+    # 這是把測試從空轉改成真的按之後才冒出來的副作用。
+    #
+    # 用同名的 global function 遮蔽 cmdlet，按鈕的程式碼路徑照樣走完，只是不會
+    # 真的啟動任何東西——比整顆跳過更有價值：漏掉的話這顆鈕就完全沒被測到。
+    $script:launched = New-Object System.Collections.Generic.List[string]
+    function global:Start-Process {
+        param(
+            [string]$FilePath,
+            $ArgumentList,
+            [switch]$Wait,
+            [switch]$PassThru,
+            $Verb,
+            $ErrorAction
+        )
+        $script:launched.Add("$FilePath $ArgumentList")
+        return $null
+    }
+
     $clicked = 0
     foreach ($file in Get-ChildItem -LiteralPath $moduleDirectory -Filter *.ps1 -File | Sort-Object Name) {
         $definition = & $file.FullName
@@ -153,6 +175,17 @@ try {
     }
 
     $watchdog.Dispose()
+    Remove-Item -LiteralPath "function:global:Start-Process" -ErrorAction SilentlyContinue
+
+    # 「開啟資料夾」有沒有真的試著開對地方。攔截之後仍然要驗它的意圖，
+    # 否則遮蔽 cmdlet 就只是把那顆鈕變成永遠不會失敗的按鈕。
+    $openedFolder = @($script:launched | Where-Object { $_ -match "explorer" })
+    if ($openedFolder.Count -eq 0) {
+        $failures.Add("沒有任何按鈕試著開啟資料夾，「開啟資料夾」可能沒被按到")
+    }
+    elseif ($openedFolder[0] -notlike "*$sandbox*") {
+        $failures.Add("「開啟資料夾」開的不是設定資料夾：$($openedFolder[0])")
+    }
 
     if ($clicked -lt 8) {
         $failures.Add("只按到 $clicked 個按鈕，控制項走訪可能沒有深入分頁")
