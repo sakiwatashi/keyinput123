@@ -201,6 +201,25 @@ try {
         $shortcut.Save()
     }
 
+    # 桌面捷徑：唯一在「輸入法壞掉時」也一定找得到的入口。
+    #
+    # 開始功能表那個只開控制台，而托盤圖示由 SmartPriorityCandidateUI.exe 提供
+    # ——那支要等第一次打字才啟動。於是輸入法沒在跑的時候恰好也沒有圖示可以點，
+    # 使用者被關在門外。這個捷徑指向 launch_smart_priority.ps1，缺什麼補什麼。
+    $launcherScript = Join-Path $targetModule "control_panel\launch_smart_priority.ps1"
+    if (Test-Path -LiteralPath $launcherScript) {
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+        $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut((Join-Path $desktop "智慧優先注音.lnk"))
+        $shortcut.TargetPath = $powershell
+        # 隱藏視窗：使用者要的是輸入法起來、控制台打開，不是一個主控台視窗。
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcherScript + '"'
+        $shortcut.WorkingDirectory = Join-Path $targetModule "control_panel"
+        $shortcut.Description = "啟動智慧優先注音並開啟控制台"
+        $shortcut.Save()
+    }
+
     # A fresh PIME installation bundles New Chewing. This product needs PIME
     # as infrastructure but exposes only Smart Priority Bopomofo. Never remove
     # New Chewing from a PIME installation that existed before this setup.

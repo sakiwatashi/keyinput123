@@ -84,4 +84,30 @@ if ($unresolved.Count -gt 0) {
     throw ("Installer builds Windows paths that do not exist:`n  " + ($unresolved -join "`n  "))
 }
 
+# 桌面捷徑：建立端與移除端必須指同一個檔名，而且指向的腳本要真的存在。
+#
+# 這一類 drift 沒有人會發現：安裝端建 A、解除安裝端刪 B，解安裝之後桌面留下
+# 一個點了沒反應的圖示，全程沒有任何錯誤訊息。名字寫死在兩個檔案裡，就一定
+# 要有東西盯著它們一致。
+$shortcutName = "智慧優先注音.lnk"
+$installText = [IO.File]::ReadAllText((Join-Path $installerRoot "install.ps1"))
+$uninstallText = [IO.File]::ReadAllText((Join-Path $installerRoot "uninstall.ps1"))
+$shortcutProblems = @()
+if ($installText -notmatch [regex]::Escape($shortcutName)) {
+    $shortcutProblems += "install.ps1 沒有建立桌面捷徑 $shortcutName"
+}
+if ($uninstallText -notmatch [regex]::Escape($shortcutName)) {
+    $shortcutProblems += "uninstall.ps1 沒有移除桌面捷徑 $shortcutName"
+}
+if ($installText -notmatch "launch_smart_priority\.ps1") {
+    $shortcutProblems += "install.ps1 沒有把桌面捷徑指向 launch_smart_priority.ps1"
+}
+$launcherScript = Join-Path (Split-Path -Parent $installerRoot) "control_panel\launch_smart_priority.ps1"
+if (-not (Test-Path -LiteralPath $launcherScript)) {
+    $shortcutProblems += "找不到 $launcherScript，桌面捷徑會指向不存在的檔案"
+}
+if ($shortcutProblems.Count -gt 0) {
+    throw ("Desktop shortcut wiring is inconsistent:`n  " + ($shortcutProblems -join "`n  "))
+}
+
 Write-Output "PASS: installer scripts are packaged, free of control characters, and their Windows paths resolve"

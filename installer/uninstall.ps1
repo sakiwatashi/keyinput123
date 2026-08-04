@@ -137,6 +137,13 @@ try {
         Remove-Item -LiteralPath $shortcutRoot -Force
     }
 
+    # 桌面捷徑也要收，不然解除安裝後桌面留下一個點了沒反應的圖示。
+    $desktopShortcut = Join-Path `
+        ([Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)) "智慧優先注音.lnk"
+    if (Test-Path -LiteralPath $desktopShortcut) {
+        Remove-Item -LiteralPath $desktopShortcut -Force
+    }
+
     $nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
     if (Test-Path -LiteralPath $nativePreferencePath) {
         Remove-Item -LiteralPath $nativePreferencePath -Force
