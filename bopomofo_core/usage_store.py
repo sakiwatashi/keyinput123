@@ -62,7 +62,16 @@ class UsageStore:
         self._counts = cleaned
 
     def record(self, text: str) -> None:
-        """Count one committed string. Single characters count too."""
+        """Count one committed string. Single characters count too.
+
+        Commits arrive as text plus whatever suffix was typed, so the same
+        phrase reaches here both bare and with a trailing space. Keying on the
+        raw string splits one phrase across two entries and dilutes exactly
+        the ranking this exists to produce. Strip first.
+        """
+        if not text:
+            return
+        text = text.strip()
         if not text:
             return
         entry = self._counts.get(text)

@@ -37,6 +37,24 @@ class UsageStoreTest(unittest.TestCase):
         self.assertEqual(store.by_length(), {1: 1, 2: 1})
         self.assertEqual(store.totals_by_length(), {1: 2, 2: 1})
 
+    def test_merges_entries_that_differ_only_by_surrounding_space(self) -> None:
+        # Commits arrive as text plus suffix, so the same phrase shows up both
+        # bare and with a trailing space. Counting them separately splits one
+        # phrase in two and dilutes the ranking.
+        store = UsageStore(self.path)
+        store.record("謝謝")
+        store.record("謝謝 ")
+        store.record(" 謝謝")
+        self.assertEqual(len(store), 1)
+        self.assertEqual(store.most_used(limit=1)[0]["count"], 3)
+        self.assertEqual(store.by_length(), {2: 1})
+
+    def test_ignores_whitespace_only_commits(self) -> None:
+        store = UsageStore(self.path)
+        store.record("   ")
+        store.record("")
+        self.assertEqual(len(store), 0)
+
     def test_filters_by_length(self) -> None:
         store = UsageStore(self.path)
         for _ in range(5):
