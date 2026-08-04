@@ -61,6 +61,9 @@ jobs:
       - name: Test user data backup rotates and restores
         shell: powershell
         run: .\tests\backup_user_data_smoke.ps1
+      - name: Test audit tool reports only what it verified
+        shell: powershell
+        run: .\tests\audit_text_service_smoke.ps1
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1
