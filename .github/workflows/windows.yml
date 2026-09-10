@@ -55,6 +55,9 @@ jobs:
       - name: Test the sync panel actually merges, not just that it clicks
         shell: powershell
         run: .\tests\sync_panel_smoke.ps1
+      - name: Test the keymap panel refuses a layout that cannot type every sound
+        shell: powershell
+        run: .\tests\keymap_panel_smoke.ps1
       - name: Test candidate filter split panes
         shell: powershell
         run: .\tests\hidden_filter_panes_smoke.ps1

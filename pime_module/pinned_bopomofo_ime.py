@@ -15,7 +15,7 @@ from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
 from .bopomofo_core.feedback_store import FeedbackStore
-from .bopomofo_core.keymap import symbol_for_event
+from .bopomofo_core.keymap import load_layout, symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
 from .bopomofo_core.usage_store import UsageStore
@@ -143,6 +143,11 @@ class PinnedBopomofoTextService(TextService):
         pin_path = os.path.join(appdata, "PinnedBopomofo", "pins.json")
         phrase_path = os.path.join(appdata, "PinnedBopomofo", "phrases.json")
         feedback_path = os.path.join(appdata, "PinnedBopomofo", "feedback.json")
+        # 自訂鍵位。無效或壞掉的配置會退回內建大千：寧可鍵位跟使用者預期不同，
+        # 也不要因為改壞一個檔案就完全打不出中文。這裡不回報原因——輸入法沒有
+        # 可以說話的地方，而按鍵追蹤預設是關的。負責解釋的是控制台的「按鍵配置」
+        # 分頁，它在存檔前就會驗，也會在開啟時說明目前這份配置有什麼問題。
+        load_layout()
         provider = LibChewingProvider(pinned_libchewing)
         self.session = CandidateSession(provider, PinnedStore(pin_path))
         self.phrase_store = PhraseStore(phrase_path)

@@ -43,6 +43,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "tools\audit_text_service.ps1") -
 # 同步工具同理：控制台的「同步」分頁直接呼叫它，沒跟著裝，那個分頁在使用者
 # 機器上就只會顯示「找不到 sync_user_data.py」。
 Copy-Item -LiteralPath (Join-Path $projectRoot "tools\sync_user_data.py") -Destination (Join-Path $moduleRoot "tools") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "tools\keymap_layout.py") -Destination (Join-Path $moduleRoot "tools") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\rime-essay-LICENSE.txt") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "licenses\MOE-OPEN-DATA-NOTICE.txt") -Destination $moduleRoot -Force

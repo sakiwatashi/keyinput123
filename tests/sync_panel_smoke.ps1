@@ -58,7 +58,10 @@ $context = [pscustomobject]@{
 }
 
 function Get-Descendant {
-    param($Control, [string]$Type, [string]$Text)
+    # $Text 不能宣告成 [string]：呼叫端傳 $null 會被轉成空字串，於是「不限
+    # 文字」變成「只找文字是空的」，找不到目標時回傳 $null，接著每一條依賴
+    # 它的斷言都拿空字串去比對——測試看起來在跑，其實什麼都沒檢查到。
+    param($Control, [string]$Type, $Text)
     foreach ($child in $Control.Controls) {
         if ($child.GetType().Name -eq $Type -and
             ($null -eq $Text -or $child.Text -like $Text)) { return $child }
