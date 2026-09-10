@@ -2702,6 +2702,37 @@ def main() -> None:
         # 那份名單，而不是讓它默默失去意義。
         assert merged, "沒有任何一組併音節，上面那份例外名單已經過時"
 
+        # --- 讀音相近時自動改字，可以關掉 -----------------------------------
+        #
+        # 台灣人常把 ㄕ／ㄙ 混在一起，所以打 ㄧㄣ ㄍㄞ 會得到「應該」。實測 1200
+        # 組隨機的兩音節組合只觸發 23 次，幾乎每次都對。但它偶爾會改掉本來就打
+        # 對的字：ㄙˉ ㄕˉ 沒有對應的詞，它就挑讀音差一格而存在的「絲絲」。
+        #
+        # 這是偏好不是對錯，所以給一個開關。預設開啟。
+        preference_file = os.path.join(preference_root, "phonetic-correction.json")
+
+        def type_si_shi(service, start):
+            for character in ("n", " ", "g", " "):   # ㄙ ˉ ㄕ ˉ
+                press(service, character, start)
+                start += 1
+            return special_key(service, 0x0D, start)["commitString"]
+
+        with open(preference_file, "w", encoding="utf-8") as handle:
+            handle.write('{"enabled": false}')
+        disabled = PinnedBopomofoTextService(DummyClient())
+        disabled.handleRequest(
+            {"method": "onActivate", "seqNum": 3500, "isKeyboardOpen": False}
+        )
+        assert type_si_shi(disabled, 3501) == "思師", "關掉之後還是改了字"
+
+        os.remove(preference_file)
+        by_default = PinnedBopomofoTextService(DummyClient())
+        by_default.handleRequest(
+            {"method": "onActivate", "seqNum": 3520, "isKeyboardOpen": False}
+        )
+        assert type_si_shi(by_default, 3521) == "絲絲", (
+            "偏好檔不存在時應該是開啟的")
+
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
 

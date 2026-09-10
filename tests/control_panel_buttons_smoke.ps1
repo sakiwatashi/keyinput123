@@ -76,6 +76,7 @@ try {
         ModuleRoot   = $null
         LauncherPath = Join-Path $sandbox "no-such-launcher.exe"
         CandidateUi  = Join-Path $sandbox "candidate-ui.json"
+        PhoneticFix  = Join-Path $sandbox "phonetic-correction.json"
         PhrasesPath  = Join-Path $sandbox "phrases.json"
         PinsPath     = Join-Path $sandbox "pins.json"
         RestartPime  = ${function:Restart-Pime}
@@ -241,8 +242,11 @@ try {
     if ($openedFolder.Count -eq 0) {
         $failures.Add("沒有任何按鈕試著開啟資料夾，「開啟資料夾」可能沒被按到")
     }
-    elseif ($openedFolder[0] -notlike "*$sandbox*") {
-        $failures.Add("「開啟資料夾」開的不是設定資料夾：$($openedFolder[0])")
+    elseif (-not ($openedFolder | Where-Object { $_ -like "*$sandbox*" })) {
+        # 只看第一個會誤判：個人詞庫的「開啟備份資料夾」修好之後也會叫起
+        # explorer，而它開的是 %LOCALAPPDATA%，不是這個沙箱。要問的是「有沒有
+        # 任何一顆開到設定資料夾」。
+        $failures.Add("沒有任何按鈕開啟設定資料夾：$($openedFolder -join ' | ')")
     }
 
     if ($clicked -lt 8) {

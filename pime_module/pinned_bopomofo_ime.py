@@ -30,6 +30,7 @@ from .bopomofo_core.phrase_store import (
     PhraseStore,
 )
 from .bopomofo_core.phonetic_corrector import PhoneticCorrector
+from .bopomofo_core.phonetic_preference import correction_enabled
 from .bopomofo_core.pinned_store import PinnedStore
 from .bopomofo_core.request_trace import shared_trace as request_trace
 from .bopomofo_core.session import CandidateSession
@@ -191,6 +192,8 @@ class PinnedBopomofoTextService(TextService):
         )
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
+        # 讀一次就好。打字路徑上碰硬碟會卡住宿主程式的輸入執行緒。
+        self.phonetic_correction = correction_enabled()
         self.english_mode = False
         self.last_key_event = None
         self.last_key_down_time = 0.0
@@ -1135,6 +1138,7 @@ class PinnedBopomofoTextService(TextService):
                     fuzzy_evidence_lookup=(
                         self.session.lexical_phrase_candidates
                     ),
+                    allow_fuzzy=self.phonetic_correction,
                 )
                 suggestion, typo_changes = self.autocorrector.correct(
                     suggestion, protected

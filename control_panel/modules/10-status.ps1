@@ -39,6 +39,15 @@
         $toggle.AutoSize = $true
         $toggle.Margin = New-Object System.Windows.Forms.Padding(4, 10, 4, 2)
 
+        # 讀音相近就替你改字（ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ、ㄣ／ㄥ）。實測 1200 組
+        # 隨機的兩音節組合只觸發 23 次，而且幾乎每次都對——做出、紙張、冒充、
+        # 撕裂、敬老。代價是偶爾會改掉你本來就打對的字：ㄙ 加 ㄕ 沒有對應的詞，
+        # 它就會挑讀音差一格而存在的「絲絲」。你打的字仍在候選裡，只是不排第一。
+        $phoneticToggle = New-Object System.Windows.Forms.CheckBox
+        $phoneticToggle.Text = "讀音相近時自動改字（ㄓㄗ、ㄔㄘ、ㄕㄙ、ㄣㄥ）"
+        $phoneticToggle.AutoSize = $true
+        $phoneticToggle.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
+
         $note = New-Object System.Windows.Forms.Label
         $note.AutoSize = $true
         $note.MaximumSize = New-Object System.Drawing.Size(860, 0)
@@ -79,6 +88,23 @@
         # Add-Row、Get-CandidateUiEnabled 一個都找不到，連 $toggle 都是 null——
         # 「重新整理」的實際效果是把表格清空然後什麼都填不回去。
         # GetNewClosure 只複製**變數**，不複製 function，所以助手必須是變數。
+        # 兩個偏好的規則一樣：只有明確的 enabled:false 會關閉，檔案不存在或
+        # 損壞一律視為開啟。這條規則必須與 Python 那一側一致
+        # （candidate_ui_client.py 與 phonetic_preference.py）。
+        $getEnabled = {
+            param([string]$path)
+            # 殼跟模組可能不同步（使用者裝了新模組、舊殼還在），少一個欄位不該
+            # 讓整個分頁變成錯誤面板。缺路徑就當成預設值。
+            if ([string]::IsNullOrWhiteSpace($path)) { return $true }
+            if (-not (Test-Path -LiteralPath $path)) { return $true }
+            try {
+                $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $value.enabled) { return [bool]$value.enabled }
+                return $true
+            }
+            catch { return $true }
+        }
+
         $getCandidateUiEnabled = {
             param([string]$path)
             # 預設開啟：只有明確的 enabled:false 會關閉，檔案不存在或損壞一律
@@ -148,6 +174,15 @@
             & $addRow $(if ($enabled) { "啟用" } else { "關閉" }) "行程外候選視窗" $source
             $toggle.Checked = $enabled
 
+            $phonetic = & $getEnabled $Context.PhoneticFix
+            $phoneticSource = if (
+                -not [string]::IsNullOrWhiteSpace($Context.PhoneticFix) -and
+                (Test-Path -LiteralPath $Context.PhoneticFix)
+            ) { $Context.PhoneticFix } else { "偏好檔不存在（預設開啟）" }
+            & $addRow $(if ($phonetic) { "啟用" } else { "關閉" }) `
+                "讀音相近時自動改字" $phoneticSource
+            $phoneticToggle.Checked = $phonetic
+
             & $addRow $(if (Test-Path -LiteralPath $Context.StateRoot) { "存在" } else { "尚未建立" }) `
                 "個人資料夾" $Context.StateRoot
         }.GetNewClosure()
@@ -163,6 +198,14 @@
                 # Set-Content -Encoding UTF8 會寫 BOM，所以這裡不能用它。
                 [IO.File]::WriteAllText($Context.CandidateUi, $json,
                     (New-Object Text.UTF8Encoding($false)))
+
+                if (-not [string]::IsNullOrWhiteSpace($Context.PhoneticFix)) {
+                    $phoneticJson = @{
+                        enabled = [bool]$phoneticToggle.Checked; version = 1
+                    } | ConvertTo-Json
+                    [IO.File]::WriteAllText($Context.PhoneticFix, $phoneticJson,
+                        (New-Object Text.UTF8Encoding($false)))
+                }
 
                 $result = & $Context.RestartPime $Context.LauncherPath
                 & $refresh
@@ -224,6 +267,7 @@
         $bottom.FlowDirection = "TopDown"
         $bottom.WrapContents = $false
         [void]$bottom.Controls.Add($toggle)
+        [void]$bottom.Controls.Add($phoneticToggle)
         [void]$bottom.Controls.Add($note)
 
         $panel.Controls.Add($grid, 0, 0)
