@@ -52,9 +52,19 @@ def key_message(character: str, sequence: int) -> dict:
 
 
 def press(service, character: str, sequence: int) -> dict:
+    """One complete keystroke: press and release.
+
+    The release matters. Windows repeats key-down while a key is held and sends
+    no key-up in between, which is how the input method tells auto-repeat from
+    a second deliberate press. A helper that only ever sends key-down models a
+    key that is never released, so two presses of the same key look like one
+    held key -- 一樣 (ㄧ then ㄧ) silently stopped being two syllables.
+    """
     reply = service.handleRequest(key_message(character, sequence))
     assert reply["success"]
     assert reply["return"] is True
+    release = dict(key_message(character, sequence), method="filterKeyUp")
+    service.handleRequest(release)
     return reply
 
 
@@ -2244,6 +2254,31 @@ def main() -> None:
                 boundary.compositionString,
                 "一聲音節被下一個字吃掉了",
             )
+
+        # 按住一個注音不放，只能得到一個符號。
+        #
+        # Windows 在按住時會一直重複送 key down 而中間沒有 key up。「用同一個
+        # 符號覆寫就開新音節」的規則把每一次重複都當成「使用者又打了一次」，
+        # 按住 ㄧ 於是一路送出「一一一一一」。
+        held = PinnedBopomofoTextService(DummyClient())
+        held.phrase_store = PhraseStore(os.path.join(appdata, "held-phrases.json"))
+        for repeat in range(6):
+            held.handleRequest(key_message("u", 2960 + repeat))  # 只有 down
+        assert held.compositionString == "ㄧ", (
+            "按住不放竟然送出了多個字",
+            held.compositionString,
+        )
+
+        # 分開按六次（每次都放開）才該得到六個字。這一條同時守住 press() 會送
+        # 放開事件——少了它，兩次擊鍵在輸入法眼中跟按住一個鍵無法區分。
+        tapped = PinnedBopomofoTextService(DummyClient())
+        tapped.phrase_store = PhraseStore(os.path.join(appdata, "tapped-phrases.json"))
+        raw_keys(tapped, "uu", 2966)
+        assert len(tapped.segments) == 1 and tapped.session.preedit == "ㄧ", (
+            "分開按兩次 ㄧ 沒有變成兩個音節",
+            tapped.compositionString,
+            len(tapped.segments),
+        )
 
         # 不照順序打仍然要能合併成一個音節。這是使用者每天在用的功能，而它跟
         # 「打完一再打下一個字」是同一組按鍵——第一版用「聲母就開新音節」去修

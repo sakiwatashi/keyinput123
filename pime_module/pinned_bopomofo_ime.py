@@ -184,6 +184,10 @@ class PinnedBopomofoTextService(TextService):
         # happening — the exact symptom this was written to fix — so the
         # fallback stands down as soon as the better route proves itself.
         self.shift_preserved_key_seen = False
+        # 目前按著沒放的實體鍵。用來認出鍵盤自動重複：Windows 會在按住時
+        # 一直送 key down 而中間沒有 key up，那是同一次擊鍵，不是使用者
+        # 又打了一次。
+        self.held_key_code = None
 
         # Completed syllables remain in one TSF composition.  This keeps the
         # underline under the entire uncommitted run and makes every character
@@ -633,7 +637,9 @@ class PinnedBopomofoTextService(TextService):
 
         symbol = symbol_for_event(keyEvent.keyCode, keyEvent.charCode)
         if symbol is not None:
-            carry = self._carry_into_new_syllable(symbol)
+            repeating = self.held_key_code == keyEvent.keyCode
+            self.held_key_code = keyEvent.keyCode
+            carry = self._carry_into_new_syllable(symbol, repeating)
             if carry is not None:
                 self._close_syllable_before(carry)
             if symbol in TONES and not self.session.preedit:
@@ -657,6 +663,8 @@ class PinnedBopomofoTextService(TextService):
         return False
 
     def filterKeyUp(self, keyEvent):
+        if self.held_key_code == keyEvent.keyCode:
+            self.held_key_code = None
         if self.shift_preserved_key_seen:
             # TSF is reporting Shift releases as a preserved key, so handling
             # them here as well would cancel out. TSF is documented to consume
@@ -1433,7 +1441,9 @@ class PinnedBopomofoTextService(TextService):
         self.setShowCandidates(False)
         self._render_buffer()
 
-    def _carry_into_new_syllable(self, symbol: str) -> list[str] | None:
+    def _carry_into_new_syllable(
+        self, symbol: str, repeating: bool = False
+    ) -> list[str] | None:
         """Whether this symbol starts a new syllable, and what comes with it.
 
         Returns None to keep editing the current syllable, otherwise the
@@ -1467,6 +1477,10 @@ class PinnedBopomofoTextService(TextService):
         """
         slot = slot_for(symbol)
         if slot is None or slot == "tone":
+            return None
+        if repeating:
+            # 鍵盤自動重複是同一次擊鍵。少了這一條，按住 ㄧ 不放會一路送出
+            # 「一一一一一」——每次重複都被當成「又打了一個一」。
             return None
         slots = self.session.editor.slots
         if slot not in slots:
