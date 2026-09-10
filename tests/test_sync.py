@@ -4,10 +4,12 @@ import unittest
 from pathlib import Path
 
 from bopomofo_core.sync import (
+    CONTEXTS_NAME,
     HIDDEN_NAME,
     PHRASES_NAME,
     PINS_NAME,
     USAGE_NAME,
+    merge_contexts,
     merge_hidden,
     merge_phrases,
     merge_pins,
@@ -135,6 +137,43 @@ class MergeHiddenTests(unittest.TestCase):
         self.assertEqual(["孳", "恣"], merged["hidden"])
 
 
+class MergeContextsTests(unittest.TestCase):
+    def test_the_same_reading_after_different_characters_both_survive(self) -> None:
+        # 兩台機器學到的是同一個讀音的不同鄰居，本來就沒有衝突可言。
+        merged = merge_contexts(
+            {"ㄔㄥˊ ㄕˋ": {"座": "城市"}},
+            {"ㄔㄥˊ ㄕˋ": {"寫": "程式"}},
+        )
+        self.assertEqual({"座": "城市", "寫": "程式"}, merged["ㄔㄥˊ ㄕˋ"])
+
+    def test_same_reading_same_context_is_settled_by_usage(self) -> None:
+        usage = {"城市": {"n": 1, "last": 5}, "程式": {"n": 40, "last": 90}}
+        merged = merge_contexts(
+            {"ㄔㄥˊ ㄕˋ": {"寫": "城市"}},
+            {"ㄔㄥˊ ㄕˋ": {"寫": "程式"}},
+            usage,
+        )
+        self.assertEqual("程式", merged["ㄔㄥˊ ㄕˋ"]["寫"])
+
+    def test_without_usage_evidence_the_local_choice_stays(self) -> None:
+        merged = merge_contexts(
+            {"ㄔㄥˊ ㄕˋ": {"寫": "城市"}}, {"ㄔㄥˊ ㄕˋ": {"寫": "程式"}}
+        )
+        self.assertEqual("城市", merged["ㄔㄥˊ ㄕˋ"]["寫"])
+
+    def test_merging_twice_changes_nothing(self) -> None:
+        remote = {"ㄔㄥˊ ㄕˋ": {"寫": "程式"}}
+        once = merge_contexts({"ㄔㄥˊ ㄕˋ": {"座": "城市"}}, remote)
+        twice = merge_contexts(once, remote)
+        self.assertEqual(once, twice)
+
+    def test_damaged_entries_do_not_stop_the_merge(self) -> None:
+        merged = merge_contexts(
+            {"ㄔㄥˊ ㄕˋ": "not a dict"}, {"ㄔㄥˊ ㄕˋ": {"寫": "程式"}}
+        )
+        self.assertEqual({"寫": "程式"}, merged["ㄔㄥˊ ㄕˋ"])
+
+
 class SyncDirectoriesTests(unittest.TestCase):
     def _write(self, root: Path, name: str, value) -> None:
         root.mkdir(parents=True, exist_ok=True)
@@ -206,7 +245,7 @@ class SyncDirectoriesTests(unittest.TestCase):
             sync_directories(lap, shared)
             sync_directories(desk, shared)
 
-            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME):
+            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME, CONTEXTS_NAME):
                 self.assertEqual(
                     (desk / name).read_bytes(), (lap / name).read_bytes(), name
                 )
@@ -221,7 +260,7 @@ class SyncDirectoriesTests(unittest.TestCase):
 
             sync_directories(state, shared)
 
-            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME):
+            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME, CONTEXTS_NAME):
                 for root in (state, shared):
                     head = (root / name).read_bytes()[:3]
                     self.assertNotEqual(b"\xef\xbb\xbf", head, f"{root.name}/{name}")

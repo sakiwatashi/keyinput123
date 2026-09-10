@@ -20,9 +20,11 @@ sys.path.insert(0, str(PIME_ROOT / "python"))
 sys.path.insert(0, str(PROJECT_ROOT / "dist" / "PIME-overlay" / "python" / "input_methods"))
 
 from pinned_bopomofo.pinned_bopomofo_ime import (
+    CandidateChoice,
     PinnedBopomofoTextService,
     SHIFT_TOGGLE_GUID,
 )
+from pinned_bopomofo.bopomofo_core.context_store import ContextStore
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
 from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
@@ -2135,6 +2137,40 @@ def main() -> None:
             "英文模式下竟然攔截了 '",
             english_reply,
         )
+
+        # 同一個讀音，接在不同的字後面記不同的詞。
+        #
+        # 沒有這一層時：選過一次「程式」之後，「這座城市很美麗」會變成
+        # 「這座程式很美麗」——一個學過的配對蓋掉了一個常用 36 倍的詞，而那句話
+        # 跟程式毫無關係。
+        ctx_service = PinnedBopomofoTextService(DummyClient())
+        ctx_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "ctx-phrases.json")
+        )
+        ctx_service.context_store = ContextStore(
+            os.path.join(appdata, "ctx-contexts.json")
+        )
+        type_readings(ctx_service, ["ㄒㄧㄝˇ", "ㄔㄥˊ", "ㄕˋ"], 2900)
+        force_composition_text(ctx_service, "寫程式")
+        # 走真實的選字路徑，不要直接呼叫 _learn_context——第一版那樣寫，把選字
+        # 裡的那一行整個刪掉測試照樣全綠，等於沒有守住呼叫點。
+        ctx_service._apply_candidate_choice(CandidateChoice("程式", 1, 3))
+
+        span = ["ㄔㄥˊ", "ㄕˋ"]
+        assert ctx_service.context_store.lookup(span, "寫") == "程式", (
+            ctx_service.context_store.contexts_for(span)
+        )
+        assert ctx_service._personal_phrase(span, "寫") == ("程式", True)
+        # 別的左鄰字不吃這一筆，而且必須回報「沒有上下文佐證」——解碼器就是靠
+        # 這個旗標決定要不要讓它蓋過詞庫。
+        _text, contextual = ctx_service._personal_phrase(span, "座")
+        assert contextual is False, "無關的上下文竟然被當成吻合"
+
+        # 句首的跨度沒有左鄰字，不該被記成任何上下文。
+        ctx_service._learn_context(0, 2, "寫程")
+        assert ctx_service.context_store.contexts_for(
+            ["ㄒㄧㄝˇ", "ㄔㄥˊ"]
+        ) == {}
 
         # Moving back to the end must still append, and Backspace's own gap
         # must keep working -- that path was already correct.

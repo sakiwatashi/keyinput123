@@ -9,7 +9,21 @@ from typing import Callable, List, Sequence
 
 PhraseLookup = Callable[[List[str]], List[str]]
 PhraseWeight = Callable[[List[str], str], int]
-PersonalLookup = Callable[[List[str]], str]
+# (readings, left-context character) -> (phrase, whether the context matched)
+PersonalLookup = Callable[[List[str], str], "tuple[str, bool]"]
+
+# How much more frequent a bundled word may be before a context-free personal
+# preference stops overruling it.
+#
+# Measured against the shipped lexicon. Readings where the user's own pick
+# should obviously win sit far below this line -- 計畫/計劃 at 1.0x, 在做/再做
+# at 3.6x. Readings where one learned pick was wrecking unrelated sentences sit
+# far above it -- 城市/程式 at 36x, 事件/試件 at 75x, 以後/以候 at 252x. The
+# gap between 3.6 and 36 is wide enough that the exact value hardly matters.
+#
+# Being conservative here is cheap: the user only has to pick the word once
+# more in that context, and the context store then remembers it for good.
+PERSONAL_OVERRIDE_RATIO = 10
 
 
 @dataclass(frozen=True)
@@ -103,7 +117,11 @@ def decode_phrase_lattice(
             if any(protected[start:end]):
                 break
             span_readings = list(readings[start:end])
-            personal = personal_lookup(span_readings)
+            # The left neighbour on the best path to here, not the text
+            # currently on screen: that is the word this span would actually
+            # follow, and it is what makes 寫|程式 and 座|城市 separable.
+            context = path.spans[-1].text[-1] if path.spans else ""
+            personal, contextual = personal_lookup(span_readings, context)
             candidates = phrase_lookup(span_readings)
             options = ([personal] if personal else []) + candidates
             best_bundled = 0
@@ -123,6 +141,19 @@ def decode_phrase_lattice(
                     # outbid a much stronger neighbouring word and change text
                     # the user never chose.
                     weight = best_bundled + 1
+                    own = max(0, phrase_weight(span_readings, phrase))
+                    if not contextual and phrase in candidates:
+                        # No evidence this word belongs *here*, only that it was
+                        # chosen for these readings once somewhere. That is how
+                        # picking 程式 once turned 這座城市很美麗 into
+                        # 這座程式很美麗: the pair outranked a word 36 times more
+                        # common, in a sentence with nothing to do with it.
+                        #
+                        # A word the lexicon does not know at all is exempt --
+                        # it is the user's own vocabulary and has no bundled
+                        # rival to lose to.
+                        if own * PERSONAL_OVERRIDE_RATIO < best_bundled:
+                            weight = own
                 else:
                     weight = max(0, phrase_weight(span_readings, phrase))
                 candidate_path = _Path(

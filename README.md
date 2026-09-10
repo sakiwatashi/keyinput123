@@ -148,11 +148,26 @@ libchewing 的輸入格式而不是使用者的鍵盤；跟著改會讓每個讀
 ```text
 %APPDATA%\PinnedBopomofo\pins.json
 %APPDATA%\PinnedBopomofo\phrases.json
+%APPDATA%\PinnedBopomofo\contexts.json
 ```
 
-`pins.json` 是單一讀音的優先字；`phrases.json` 是從使用者確認文字學到的詞語。
-兩者都可以直接備份。寫入採原子替換；若檔案意外損壞，輸入法會把原檔改名為
-`*.corrupt-日期時間.json` 後以空資料啟動，不會因此整個失效。
+`pins.json` 是單一讀音的優先字；`phrases.json` 是從使用者確認文字學到的詞語；
+`contexts.json` 記的是「這個讀音**接在哪個字後面**時你選了什麼」。都可以直接備份。
+寫入採原子替換；若檔案意外損壞，輸入法會把原檔改名為 `*.corrupt-日期時間.json`
+後以空資料啟動，不會因此整個失效。
+
+### 為什麼需要 contexts.json
+
+`phrases.json` 只回答「這個讀音變成了什麼」，不管它出現在哪裡。所以選過一次
+「程式」之後，「這座城市很美麗」會變成「這座程式很美麗」—— 一個學過的配對蓋掉
+了常用 36 倍的詞，而那句話跟程式毫無關係。
+
+一個字的左鄰上下文就足以分開它們：`座→城市` 和 `寫→程式` 都常見，`座→程式` 和
+`寫→城市` 都不常見。有上下文佐證時，使用者的選擇照樣立刻生效；沒有佐證時，個人
+偏好只在候選勢均力敵時覆寫詞庫（「計畫／計劃」1.0 倍、「在做／再做」3.6 倍都算
+勢均力敵），差距懸殊時就交給詞庫，等使用者在那個上下文再選一次。
+
+詞庫沒有的自造詞不受這條規則限制 —— 它沒有內建對手可以輸給。
 
 輪替備份：
 
@@ -185,7 +200,8 @@ python tools\sync_user_data.py --folder D:\OneDrive\PinnedBopomofo --dry-run
 的實際使用次數決定，並逐條列出保留了什麼、捨棄了什麼。合併同一份來源兩次的結
 果跟一次相同，所以放進排程重複執行是安全的。
 
-同步的檔案是 `phrases.json`、`pins.json`、`usage.json`、`hidden-characters.json`。
+同步的檔案是 `phrases.json`、`pins.json`、`usage.json`、`hidden-characters.json`、
+`contexts.json`。
 `keyevent-trace.json` 與 `candidate-ui.json` 刻意排除：前者是可再生的診斷資料，
 後者描述的是這台機器（哪套反作弊、哪個螢幕）而不是使用者。
 

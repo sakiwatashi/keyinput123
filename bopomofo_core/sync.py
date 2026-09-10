@@ -37,7 +37,14 @@ PHRASES_NAME = "phrases.json"
 PINS_NAME = "pins.json"
 USAGE_NAME = "usage.json"
 HIDDEN_NAME = "hidden-characters.json"
-SYNCED_FILES = (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME)
+CONTEXTS_NAME = "contexts.json"
+SYNCED_FILES = (
+    PHRASES_NAME,
+    PINS_NAME,
+    USAGE_NAME,
+    HIDDEN_NAME,
+    CONTEXTS_NAME,
+)
 
 
 def _int(value: Any) -> int:
@@ -195,6 +202,69 @@ def merge_phrases(
     return merged
 
 
+# ---- contexts ---------------------------------------------------------------
+
+
+def merge_contexts(
+    local: dict[str, Any],
+    remote: dict[str, Any],
+    usage: dict[str, Any] | None = None,
+    report: MergeReport | None = None,
+) -> dict[str, dict[str, str]]:
+    """Union both context tables, one level deeper than the phrase index.
+
+    contexts.json is ``{readings: {left character: word}}``, so two machines
+    that learned the same reading after different neighbours have nothing to
+    argue about -- the union simply knows both. Only the same reading after the
+    same character can conflict, and that is settled exactly as phrases are.
+    """
+    usage = usage or {}
+    report = report or MergeReport()
+    merged: dict[str, dict[str, str]] = {}
+    added = pushed = 0
+
+    for reading in set(local) | set(remote):
+        here = local.get(reading) if isinstance(local.get(reading), dict) else {}
+        there = remote.get(reading) if isinstance(remote.get(reading), dict) else {}
+        pairs = dict(here)
+        for context, phrase in there.items():
+            if not isinstance(phrase, str) or not phrase:
+                continue
+            current = pairs.get(context)
+            if current is None:
+                pairs[context] = phrase
+                added += 1
+            elif current != phrase:
+                if _usage_rank(phrase, usage) > _usage_rank(current, usage):
+                    pairs[context] = phrase
+                    report.conflicts.append(
+                        Conflict(
+                            CONTEXTS_NAME,
+                            f"{context}｜{reading}",
+                            phrase,
+                            current,
+                            "遠端使用較多",
+                        )
+                    )
+                else:
+                    report.conflicts.append(
+                        Conflict(
+                            CONTEXTS_NAME,
+                            f"{context}｜{reading}",
+                            current,
+                            phrase,
+                            "保留本機",
+                        )
+                    )
+        pushed += len(set(here) - set(there))
+        if pairs:
+            merged[reading] = pairs
+
+    report.note_added(CONTEXTS_NAME, added)
+    report.note_pushed(CONTEXTS_NAME, pushed)
+    return merged
+
+
 # ---- pins -------------------------------------------------------------------
 
 
@@ -335,6 +405,12 @@ def sync_directories(
         load_json_object(sync_root / HIDDEN_NAME),
         report,
     )
+    contexts = merge_contexts(
+        load_json_object(state_root / CONTEXTS_NAME),
+        load_json_object(sync_root / CONTEXTS_NAME),
+        usage,
+        report,
+    )
 
     if dry_run:
         return report
@@ -344,6 +420,7 @@ def sync_directories(
         PINS_NAME: pins,
         USAGE_NAME: {"version": 1, "counts": usage},
         HIDDEN_NAME: hidden,
+        CONTEXTS_NAME: contexts,
     }
     for root in (state_root, sync_root):
         for name, value in payloads.items():

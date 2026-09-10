@@ -28,7 +28,7 @@ class PhraseDecoderTests(unittest.TestCase):
             [False, False, False],
             lambda readings: phrases.get(tuple(readings), []),
             lambda _readings, phrase: weights.get(phrase, 0),
-            lambda _readings: "",
+            lambda _readings, _context: ("", False),
         )
 
         self.assertEqual("每遇到", "".join(span.text for span in spans))
@@ -53,7 +53,7 @@ class PhraseDecoderTests(unittest.TestCase):
             [False] * 4,
             self.lookup,
             self.weight,
-            lambda readings: "",
+            lambda _readings, _context: ("", False),
         )
         self.assertEqual("".join(span.text for span in spans), "層數較高")
 
@@ -64,7 +64,7 @@ class PhraseDecoderTests(unittest.TestCase):
             [True, False, False, False],
             self.lookup,
             self.weight,
-            lambda readings: "",
+            lambda _readings, _context: ("", False),
         )
         self.assertEqual("".join(span.text for span in spans), "曾恕較高")
 
@@ -75,7 +75,7 @@ class PhraseDecoderTests(unittest.TestCase):
             [False, False],
             self.lookup,
             self.weight,
-            lambda readings: "自訂" if readings == ["r0", "r1"] else "",
+            lambda readings, _context: ("自訂", False) if readings == ["r0", "r1"] else ("", False),
         )
         self.assertEqual("".join(span.text for span in spans), "自訂")
         self.assertTrue(spans[0].personal)
@@ -109,7 +109,7 @@ class PhraseDecoderTests(unittest.TestCase):
             [False, False, False],
             lambda readings: phrases.get(tuple(readings), []),
             lambda _readings, phrase: weights.get(phrase, 0),
-            lambda readings: "化一" if readings == ["hua", "yi"] else "",
+            lambda readings, _context: ("化一", False) if readings == ["hua", "yi"] else ("", False),
         )
         self.assertEqual("".join(span.text for span in spans), "電話一")
 
@@ -131,12 +131,89 @@ class PhraseDecoderTests(unittest.TestCase):
             [False, False, False],
             lambda readings: phrases.get(tuple(readings), []),
             lambda _readings, phrase: weights.get(phrase, 0),
-            lambda readings: (
-                "王小明" if readings == ["wang", "xiao", "ming"] else ""
+            lambda readings, _context: (
+                ("王小明", False)
+                if readings == ["wang", "xiao", "ming"]
+                else ("", False)
             ),
         )
         self.assertEqual("".join(span.text for span in spans), "王小明")
         self.assertTrue(spans[0].personal)
+
+
+class PersonalContextTests(unittest.TestCase):
+    """一個學過的詞不該接管跟它無關的句子。
+
+    實測的病徵：選過一次「程式」之後，「這座城市很美麗」變成「這座程式很美麗」
+    ——個人偏好蓋過一個常用 36 倍的詞，而那句話跟程式毫無關係。
+    """
+
+    PHRASES = {("cheng", "shi"): ["城市", "程式"]}
+    WEIGHTS = {"城市": 38332, "程式": 1059}  # 實際詞庫裡的數字
+
+    def decode(self, personal, contextual):
+        return "".join(
+            span.text
+            for span in decode_phrase_lattice(
+                ["cheng", "shi"],
+                "？？",
+                [False, False],
+                lambda readings: self.PHRASES.get(tuple(readings), []),
+                lambda _readings, phrase: self.WEIGHTS.get(phrase, 0),
+                lambda _readings, _context: (personal, contextual),
+            )
+        )
+
+    def test_without_context_a_far_more_common_word_keeps_the_span(self) -> None:
+        self.assertEqual("城市", self.decode("程式", contextual=False))
+
+    def test_with_matching_context_the_learned_word_wins(self) -> None:
+        self.assertEqual("程式", self.decode("程式", contextual=True))
+
+    def test_a_close_preference_still_takes_effect_without_context(self) -> None:
+        # 在做(10951)/再做(3057) 只差 3.6 倍。這種真的有歧義的配對，使用者選過
+        # 一次就該立刻生效——把門檻訂得太嚴會讓學習整個失去意義。
+        phrases = {("zai", "zuo"): ["在做", "再做"]}
+        weights = {"在做": 10951, "再做": 3057}
+        spans = decode_phrase_lattice(
+            ["zai", "zuo"],
+            "？？",
+            [False, False],
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            lambda _readings, _context: ("再做", False),
+        )
+        self.assertEqual("再做", "".join(span.text for span in spans))
+
+    def test_a_word_the_lexicon_does_not_know_always_wins(self) -> None:
+        # 使用者自己的詞彙沒有「內建對手」可以輸給。少了這個豁免，人名之類的
+        # 自造詞會因為權重 0 而永遠打不出來。
+        self.assertEqual("橙柿", self.decode("橙柿", contextual=False))
+
+    def test_context_is_the_decoded_left_neighbour(self) -> None:
+        # 上下文取的是「最佳路徑上左邊那個詞的最後一字」，不是畫面上目前的文字。
+        # 那才是這個跨度真正接在後面的字。
+        phrases = {("xie",): ["寫"], ("cheng", "shi"): ["城市", "程式"]}
+        weights = {"寫": 5000, "城市": 38332, "程式": 1059}
+        seen: list[str] = []
+
+        def personal(readings, context):
+            if tuple(readings) == ("cheng", "shi"):
+                seen.append(context)
+                return ("程式", context == "寫")
+            return ("", False)
+
+        spans = decode_phrase_lattice(
+            ["xie", "cheng", "shi"],
+            "？？？",
+            [False, False, False],
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            personal,
+        )
+
+        self.assertIn("寫", seen, f"沒有把左鄰字當成上下文送進來：{seen}")
+        self.assertEqual("寫程式", "".join(span.text for span in spans))
 
 
 if __name__ == "__main__":

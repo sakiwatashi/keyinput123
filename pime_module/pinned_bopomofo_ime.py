@@ -14,6 +14,7 @@ from textService import TextService
 from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
+from .bopomofo_core.context_store import ContextStore
 from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.keymap import is_typable_reading, load_layout, symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
@@ -157,6 +158,12 @@ class PinnedBopomofoTextService(TextService):
             os.path.join(appdata, "PinnedBopomofo", "usage.json")
         )
         self.feedback_store = FeedbackStore(feedback_path)
+        # 「這個讀音接在哪個字後面時你選了什麼」。跟 usage.json 一樣獨立存放：
+        # phrases.json 是不可取代的資料，改它的格式就要背一個遷移，而這個檔
+        # 壞掉或不見只讓選字退回原本的行為。
+        self.context_store = ContextStore(
+            os.path.join(appdata, "PinnedBopomofo", "contexts.json")
+        )
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         self.english_mode = False
@@ -971,7 +978,8 @@ class PinnedBopomofoTextService(TextService):
         ):
             return []
         readings = [segment.reading for segment in self.segments[start:end]]
-        personal = self.phrase_store.exact(readings)
+        context = self.segments[start - 1].text[-1] if start > 0 else ""
+        personal, _contextual = self._personal_phrase(readings, context)
         frequent = self.session.validated_frequent_phrase_candidates(
             readings,
             [segment.candidates for segment in self.segments[start:end]],
@@ -1004,7 +1012,7 @@ class PinnedBopomofoTextService(TextService):
                 protected,
                 self.session.lexical_phrase_candidates,
                 self.session.phrase_weight,
-                self.phrase_store.exact,
+                self._personal_phrase,
                 MAX_PHRASE_LENGTH,
             )
             for span in decoded:
@@ -1307,6 +1315,8 @@ class PinnedBopomofoTextService(TextService):
             self.session.pins.pin(readings[0], choice.text)
         else:
             self.phrase_store.learn(readings, choice.text)
+            # 選字是使用者最明確的表態，連同左鄰字一起記下來。
+            self._learn_context(choice.start, choice.end, choice.text)
         for segment, selected in zip(
             self.segments[choice.start : choice.end], choice.text
         ):
@@ -1410,6 +1420,37 @@ class PinnedBopomofoTextService(TextService):
         self.setShowCandidates(False)
         self._render_buffer()
 
+    def _personal_phrase(self, readings: list[str], context: str) -> tuple[str, bool]:
+        """The user's word for these readings, and whether the context backs it.
+
+        Context wins when it exists: 寫→程式 and 座→城市 are recorded
+        separately, so one of them can no longer wreck the other's sentence.
+
+        Falling back to the context-free memory keeps every phrase already in
+        phrases.json working. It simply stops being able to overrule a far more
+        common word without evidence that it belongs in this particular spot --
+        the decoder decides that, see PERSONAL_OVERRIDE_RATIO.
+        """
+        remembered = self.context_store.lookup(readings, context)
+        if remembered:
+            return (remembered, True)
+        return (self.phrase_store.exact(readings), False)
+
+    def _learn_context(self, start: int, end: int, text: str) -> None:
+        """Record what the user chose here, and what it followed.
+
+        Only spans the user actually corrected reach this. Learning from the
+        engine's own guesses would fill the store with the defaults it already
+        produces, and then confirm them forever.
+        """
+        if start <= 0 or not MIN_PHRASE_LENGTH <= end - start <= MAX_PHRASE_LENGTH:
+            return
+        self.context_store.learn(
+            [segment.reading for segment in self.segments[start:end]],
+            text,
+            self.segments[start - 1].text[-1],
+        )
+
     def _typable_runs(self) -> list[tuple[int, int]]:
         """Maximal spans of segments whose readings are real Bopomofo.
 
@@ -1463,7 +1504,7 @@ class PinnedBopomofoTextService(TextService):
             protected,
             self.session.lexical_phrase_candidates,
             self.session.phrase_weight,
-            self.phrase_store.exact,
+            self._personal_phrase,
             MAX_PHRASE_LENGTH,
         )
         for span in spans:
@@ -1611,6 +1652,12 @@ class PinnedBopomofoTextService(TextService):
                 text,
                 extra_spans=corrected_spans,
             )
+            # 同一批親手修正過的跨度，也記下它接在哪個字後面。學整句沒有意義：
+            # 句首那一段沒有左鄰字，而整句本來就已經是 phrases.json 的職責。
+            for span_start, span_end in corrected_spans:
+                self._learn_context(
+                    span_start, span_end, text[span_start:span_end]
+                )
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
