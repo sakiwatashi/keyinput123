@@ -25,6 +25,7 @@ from pinned_bopomofo.pinned_bopomofo_ime import (
     SHIFT_TOGGLE_GUID,
 )
 from pinned_bopomofo.bopomofo_core.context_store import ContextStore
+from pinned_bopomofo.bopomofo_core.word_usage import WordUsageStore
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
 from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
@@ -2204,6 +2205,58 @@ def main() -> None:
         assert heal_service.phrase_store.exact(heal_readings) == "", (
             "跟使用者選擇牴觸的個人詞條沒有被丟掉，下次組字它又會贏回來",
             heal_service.phrase_store.exact(heal_readings),
+        )
+
+        # 詞頻表：送出時記錄，用得夠多就排到詞庫前面。
+        #
+        # 字的層級分不出「不」和「步」；詞的層級（一步／一部）讀音串不同，各自
+        # 累積，不會互相干擾。使用者指出的就是這一點。
+        freq = PinnedBopomofoTextService(DummyClient())
+        freq.phrase_store = PhraseStore(os.path.join(appdata, "freq-phrases.json"))
+        freq.word_usage = WordUsageStore(os.path.join(appdata, "freq-words.json"))
+        yibu = ["ㄧˉ", "ㄅㄨˋ"]        # ㄧˉ ㄅㄨˋ
+        yibu_keys = "".join(keys_for_reading(r) for r in yibu)
+
+        def typed_once(seq):
+            service = PinnedBopomofoTextService(DummyClient())
+            service.phrase_store = freq.phrase_store
+            service.word_usage = freq.word_usage
+            for key in yibu_keys:
+                press(service, key, seq)
+                seq += 1
+            return service.compositionString
+
+        before = typed_once(2940)
+        freq.word_usage.record(yibu, "一步")           # 一步，第一次
+        assert typed_once(2942) == before, (
+            "用過一次就搶走了排序。一次跟隨手送出的錯字分不開——無條件覆寫詞庫"
+            "正是「部要」「下一不」那一類問題的來源。"
+        )
+        for _ in range(2):
+            freq.word_usage.record(yibu, "一步")
+        after = typed_once(2945)
+        assert after == "一步", (
+            "用過三次之後詞頻表沒有把它排到前面",
+            before,
+            after,
+        )
+        assert before != after, ("詞庫本來就給這個答案，這條測試沒有驗到東西", before)
+
+        # 送出時要真的記到帳上。第一版拿 locked 當保護遮罩重跑詞網格，而送出時
+        # 每一格通常都 locked，詞網格只會回傳一串單字，一個詞都記不到。
+        counted = PinnedBopomofoTextService(DummyClient())
+        counted.phrase_store = PhraseStore(os.path.join(appdata, "counted-phrases.json"))
+        counted.word_usage = WordUsageStore(os.path.join(appdata, "counted-words.json"))
+        sequence = 2950
+        for key in yibu_keys:
+            press(counted, key, sequence)
+            sequence += 1
+        committed = counted.compositionString
+        counted._commit_buffer()
+        assert counted.word_usage.count(yibu, committed) == 1, (
+            "送出的詞沒有被記錄",
+            committed,
+            counted.word_usage.words_for(yibu),
         )
 
         # 跟畫面無關的條目不能被連帶刪掉。

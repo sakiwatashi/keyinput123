@@ -150,10 +150,12 @@ libchewing 的輸入格式而不是使用者的鍵盤；跟著改會讓每個讀
 %APPDATA%\PinnedBopomofo\pins.json
 %APPDATA%\PinnedBopomofo\phrases.json
 %APPDATA%\PinnedBopomofo\contexts.json
+%APPDATA%\PinnedBopomofo\word_usage.json
 ```
 
 `pins.json` 是單一讀音的優先字；`phrases.json` 是從使用者確認文字學到的詞語；
-`contexts.json` 記的是「這個讀音**接在哪個字後面**時你選了什麼」。都可以直接備份。
+`contexts.json` 記的是「這個讀音**接在哪個字後面**時你選了什麼」；`word_usage.json`
+是你自己的詞頻表。都可以直接備份。
 寫入採原子替換；若檔案意外損壞，輸入法會把原檔改名為 `*.corrupt-日期時間.json`
 後以空資料啟動，不會因此整個失效。
 
@@ -176,6 +178,18 @@ libchewing 的輸入格式而不是使用者的鍵盤；跟著改會讓每個讀
 .\tools\backup_user_data.ps1          # 備份一次並輪替
 .\tools\backup_user_data.ps1 -List    # 列出現有備份
 ```
+
+### 你自己的詞頻表
+
+`phrases.json` 記「這串讀音變成什麼」，但沒有次數——用過五百次的詞和誤學一次的詞
+權威完全相同，「部要」「下一不」就是這樣長期壓過內建詞庫的。
+
+`word_usage.json` 補上次數。送出時把文字切成已知的詞各記一次，用到三次以上就排到
+內建詞庫前面。一次不算：一次跟隨手送出的錯字分不開。
+
+刻意記在**詞**上而不是字上。同一個讀音下的常用字太多，「不」和「步」當成字是無解
+的歧義；當成詞（`不要`／`下一步`）讀音串不同，各自累積，不會互相干擾。實測「步行」
+被「不行」壓著的老問題，用過三次就翻過來。
 
 ### 在兩台機器之間同步詞庫
 
@@ -202,7 +216,7 @@ python tools\sync_user_data.py --folder D:\OneDrive\PinnedBopomofo --dry-run
 果跟一次相同，所以放進排程重複執行是安全的。
 
 同步的檔案是 `phrases.json`、`pins.json`、`usage.json`、`hidden-characters.json`、
-`contexts.json`。
+`contexts.json`、`word_usage.json`。
 `keyevent-trace.json` 與 `candidate-ui.json` 刻意排除：前者是可再生的診斷資料，
 後者描述的是這台機器（哪套反作弊、哪個螢幕）而不是使用者。
 

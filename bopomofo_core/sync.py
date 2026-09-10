@@ -38,12 +38,14 @@ PINS_NAME = "pins.json"
 USAGE_NAME = "usage.json"
 HIDDEN_NAME = "hidden-characters.json"
 CONTEXTS_NAME = "contexts.json"
+WORD_USAGE_NAME = "word_usage.json"
 SYNCED_FILES = (
     PHRASES_NAME,
     PINS_NAME,
     USAGE_NAME,
     HIDDEN_NAME,
     CONTEXTS_NAME,
+    WORD_USAGE_NAME,
 )
 
 
@@ -265,6 +267,34 @@ def merge_contexts(
     return merged
 
 
+def merge_word_usage(
+    local: dict[str, Any],
+    remote: dict[str, Any],
+    report: MergeReport | None = None,
+) -> dict[str, dict[str, int]]:
+    """每個詞取兩邊的較大值。
+
+    跟 usage.json 同樣的理由：同步會重複跑，相加會讓次數無上限膨脹。max 是幂等
+    的，而這些數字只用來排序，本來就是「你多常用這個詞」的近似。
+    """
+    report = report or MergeReport()
+    merged: dict[str, dict[str, int]] = {}
+    added = pushed = 0
+    for reading in set(local) | set(remote):
+        here = local.get(reading) if isinstance(local.get(reading), dict) else {}
+        there = remote.get(reading) if isinstance(remote.get(reading), dict) else {}
+        words = {}
+        for word in set(here) | set(there):
+            words[word] = max(_int(here.get(word)), _int(there.get(word)))
+        added += len(set(there) - set(here))
+        pushed += len(set(here) - set(there))
+        if words:
+            merged[reading] = words
+    report.note_added(WORD_USAGE_NAME, added)
+    report.note_pushed(WORD_USAGE_NAME, pushed)
+    return merged
+
+
 # ---- pins -------------------------------------------------------------------
 
 
@@ -405,6 +435,11 @@ def sync_directories(
         load_json_object(sync_root / HIDDEN_NAME),
         report,
     )
+    word_usage = merge_word_usage(
+        _read_counts(state_root / WORD_USAGE_NAME),
+        _read_counts(sync_root / WORD_USAGE_NAME),
+        report,
+    )
     contexts = merge_contexts(
         load_json_object(state_root / CONTEXTS_NAME),
         load_json_object(sync_root / CONTEXTS_NAME),
@@ -421,6 +456,7 @@ def sync_directories(
         USAGE_NAME: {"version": 1, "counts": usage},
         HIDDEN_NAME: hidden,
         CONTEXTS_NAME: contexts,
+        WORD_USAGE_NAME: {"version": 1, "counts": word_usage},
     }
     for root in (state_root, sync_root):
         for name, value in payloads.items():

@@ -9,11 +9,13 @@ from bopomofo_core.sync import (
     PHRASES_NAME,
     PINS_NAME,
     USAGE_NAME,
+    WORD_USAGE_NAME,
     merge_contexts,
     merge_hidden,
     merge_phrases,
     merge_pins,
     merge_usage,
+    merge_word_usage,
     sync_directories,
 )
 
@@ -174,6 +176,23 @@ class MergeContextsTests(unittest.TestCase):
         self.assertEqual({"寫": "程式"}, merged["ㄔㄥˊ ㄕˋ"])
 
 
+class MergeWordUsageTests(unittest.TestCase):
+    def test_takes_the_larger_count(self) -> None:
+        merged = merge_word_usage(
+            {"ㄧˉ ㄅㄨˋ": {"一步": 7}}, {"ㄧˉ ㄅㄨˋ": {"一步": 4, "一部": 2}}
+        )
+        self.assertEqual({"一步": 7, "一部": 2}, merged["ㄧˉ ㄅㄨˋ"])
+
+    def test_merging_twice_changes_nothing(self) -> None:
+        remote = {"ㄧˉ ㄅㄨˋ": {"一步": 4}}
+        once = merge_word_usage({"ㄧˉ ㄅㄨˋ": {"一步": 7}}, remote)
+        self.assertEqual(once, merge_word_usage(once, remote))
+
+    def test_damaged_entries_do_not_stop_the_merge(self) -> None:
+        merged = merge_word_usage({"ㄧˉ ㄅㄨˋ": "壞的"}, {"ㄧˉ ㄅㄨˋ": {"一步": 3}})
+        self.assertEqual({"一步": 3}, merged["ㄧˉ ㄅㄨˋ"])
+
+
 class SyncDirectoriesTests(unittest.TestCase):
     def _write(self, root: Path, name: str, value) -> None:
         root.mkdir(parents=True, exist_ok=True)
@@ -245,7 +264,14 @@ class SyncDirectoriesTests(unittest.TestCase):
             sync_directories(lap, shared)
             sync_directories(desk, shared)
 
-            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME, CONTEXTS_NAME):
+            for name in (
+                PHRASES_NAME,
+                PINS_NAME,
+                USAGE_NAME,
+                HIDDEN_NAME,
+                CONTEXTS_NAME,
+                WORD_USAGE_NAME,
+            ):
                 self.assertEqual(
                     (desk / name).read_bytes(), (lap / name).read_bytes(), name
                 )
@@ -260,7 +286,14 @@ class SyncDirectoriesTests(unittest.TestCase):
 
             sync_directories(state, shared)
 
-            for name in (PHRASES_NAME, PINS_NAME, USAGE_NAME, HIDDEN_NAME, CONTEXTS_NAME):
+            for name in (
+                PHRASES_NAME,
+                PINS_NAME,
+                USAGE_NAME,
+                HIDDEN_NAME,
+                CONTEXTS_NAME,
+                WORD_USAGE_NAME,
+            ):
                 for root in (state, shared):
                     head = (root / name).read_bytes()[:3]
                     self.assertNotEqual(b"\xef\xbb\xbf", head, f"{root.name}/{name}")

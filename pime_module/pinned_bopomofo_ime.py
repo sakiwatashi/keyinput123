@@ -20,6 +20,7 @@ from .bopomofo_core.keymap import is_typable_reading, load_layout, symbol_for_ev
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
 from .bopomofo_core.usage_store import UsageStore
+from .bopomofo_core.word_usage import WordUsageStore
 from .bopomofo_core.phrase_store import (
     MAX_PHRASE_LENGTH,
     MIN_PHRASE_LENGTH,
@@ -102,6 +103,13 @@ CTRL_PUNCTUATION = {
     (VK_OEM_LBRACKET, True): "『",
     (VK_OEM_RBRACKET, True): "』",
 }
+# 你自己用過一次值多少詞庫權重。詞庫權重的量級是 0 到二十萬，一步(5813) 對
+# 一部(21778) 差一萬六，所以八次左右能翻過來——夠快到有感，又不會第一次就
+# 搶走一個常用詞。
+WORD_USE_BONUS = 2000
+# 用過幾次才算習慣。一次跟隨手送出的錯字分不開——個人偏好無條件覆寫詞庫，
+# 正是「部要」「下一不」那一類問題的來源。
+WORD_USE_CONFIDENCE = 3
 CANDIDATE_PAGE_SIZE = 10
 MAX_PHRASE_CHOICES = 12
 CANDIDATES_PER_ROW = 2
@@ -172,6 +180,11 @@ class PinnedBopomofoTextService(TextService):
         # 壞掉或不見只讓選字退回原本的行為。
         self.context_store = ContextStore(
             os.path.join(appdata, "PinnedBopomofo", "contexts.json")
+        )
+        # 你自己的詞頻表。字的層級分不出「不」和「步」，詞的層級（不要／
+        # 下一步）根本沒有歧義——讀音串不同，不會互相干擾。
+        self.word_usage = WordUsageStore(
+            os.path.join(appdata, "PinnedBopomofo", "word_usage.json")
         )
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
@@ -354,6 +367,7 @@ class PinnedBopomofoTextService(TextService):
         # memory when the profile goes away. Write them out here.
         try:
             self.usage_store.flush()
+            self.word_usage.flush()
         except Exception:
             pass
 
@@ -1031,7 +1045,7 @@ class PinnedBopomofoTextService(TextService):
                 current_text,
                 protected,
                 self.session.lexical_phrase_candidates,
-                self.session.phrase_weight,
+                self._weighted_phrase,
                 self._personal_phrase,
                 MAX_PHRASE_LENGTH,
             )
@@ -1110,6 +1124,7 @@ class PinnedBopomofoTextService(TextService):
             phrase
             for phrase in dict.fromkeys(
                 ([personal] if personal else [])
+                + self._favoured_words(readings)
                 + trusted_front
                 + corrected
                 + frequent
@@ -1581,6 +1596,73 @@ class PinnedBopomofoTextService(TextService):
                 if chosen != text:
                     self.phrase_store.forget(readings)
 
+    def _favoured_words(self, readings: list[str]) -> list[str]:
+        """你自己用得夠多的詞，排在詞庫前面。
+
+        用過一次不算——那跟隨手送出的錯字分不開，而個人偏好無條件覆寫詞庫正是
+        「部要」「下一不」那一類問題的來源。要連續用到 WORD_USE_CONFIDENCE 次，
+        而且是這段讀音底下用得最多的那個，才排到前面。
+
+        這是詞的層級，所以沒有同音歧義：「不要」和「下一步」的讀音串不同，各自
+        累積，不會互相干擾。字的層級做不到這件事。
+        """
+        counts = self.word_usage.words_for(readings)
+        if not counts:
+            return []
+        word, count = max(counts.items(), key=lambda item: (item[1], item[0]))
+        if count < WORD_USE_CONFIDENCE:
+            return []
+        return [word]
+
+    def _record_word_usage(self) -> None:
+        """把這次送出的文字切成已知的詞，每個記一次。
+
+        用最長匹配掃過送出的內容，而不是重跑詞網格。送出時每一格通常都是 locked
+        （使用者選過或詞彙鎖定過），而 locked 在詞網格裡是硬邊界——重跑只會得到
+        一串單字，一個詞都記不到。這裡要的也不是「網格覺得該怎麼切」，而是「送出
+        的這段文字由哪些已知的詞組成」。
+
+        只記兩個字以上、而且詞庫或個人詞庫真的認得的跨度。認不得的就跳過一格，
+        不要把隨機的字組當成詞餵進去。
+        """
+        if len(self.segments) < MIN_PHRASE_LENGTH:
+            return
+        readings = [segment.reading for segment in self.segments]
+        text = "".join(segment.text for segment in self.segments)
+        index = 0
+        while index < len(readings):
+            widest = min(MAX_PHRASE_LENGTH, len(readings) - index)
+            for width in range(widest, MIN_PHRASE_LENGTH - 1, -1):
+                span_readings = readings[index : index + width]
+                span_text = text[index : index + width]
+                if not all(
+                    is_typable_reading(reading) for reading in span_readings
+                ):
+                    continue
+                known = span_text in self.session.lexical_phrase_candidates(
+                    span_readings
+                ) or self.phrase_store.exact(span_readings) == span_text
+                if known:
+                    self.word_usage.record(span_readings, span_text)
+                    index += width
+                    break
+            else:
+                index += 1
+
+    def _weighted_phrase(self, readings: list[str], phrase: str) -> int:
+        """詞庫權重加上你自己用過幾次。
+
+        內建權重是全語料的統計，這一項是你的。兩個都是「這個詞有多常見」，只是
+        母體不同，所以直接相加而不是誰覆寫誰——用得夠多就贏得過詞庫，用得不多
+        就只是往前挪一點。
+
+        每次 WORD_USE_BONUS 的量級是照詞庫權重的尺度挑的：一步(5813) 對
+        一部(21778) 差一萬六，用個八次就能翻過來。個人偏好該在「用了幾次」之後
+        生效，不是第一次就搶走。
+        """
+        base = self.session.phrase_weight(readings, phrase)
+        return base + self.word_usage.count(readings, phrase) * WORD_USE_BONUS
+
     def _personal_phrase(self, readings: list[str], context: str) -> tuple[str, bool]:
         """The user's word for these readings, and whether the context backs it.
 
@@ -1664,7 +1746,7 @@ class PinnedBopomofoTextService(TextService):
             current_text,
             protected,
             self.session.lexical_phrase_candidates,
-            self.session.phrase_weight,
+            self._weighted_phrase,
             self._personal_phrase,
             MAX_PHRASE_LENGTH,
         )
@@ -1819,6 +1901,7 @@ class PinnedBopomofoTextService(TextService):
                 self._learn_context(
                     span_start, span_end, text[span_start:span_end]
                 )
+        self._record_word_usage()
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
