@@ -22,6 +22,14 @@ CHINESE_MODE = 1
 # dictionary's rare-character tail becomes noise.
 MAX_CANDIDATES = 20
 MAX_CONTEXT_SYLLABLES = 64
+
+# 快取上限。輸入法是長時間執行的行程，而 _trusted_phrase_cache 原本沒有上限——
+# 打得愈久佔得愈多，沒有東西會把它收回去。打字有很強的區域性，滿了就整份倒掉比
+# 逐筆淘汰簡單，重新算一次也只是回到沒有快取的成本。
+#
+# 試過替 best_phrase 也加一份，但量不出差別（它大部分的呼叫本來就走在
+# _trusted_phrase_cache 後面），所以沒有留。多一份快取就多一份會發臭的狀態。
+TRUSTED_PHRASE_CACHE_LIMIT = 4096
 FREQUENCY_LEXICON = FrequencyLexicon()
 TAIWAN_FREQUENCY = TaiwanFrequency()
 READING_PHRASE_LEXICON = ReadingPhraseLexicon()
@@ -228,6 +236,8 @@ class LibChewingProvider:
         cached = self._trusted_phrase_cache.get(key)
         if cached is not None:
             return list(cached)
+        if len(self._trusted_phrase_cache) >= TRUSTED_PHRASE_CACHE_LIMIT:
+            self._trusted_phrase_cache.clear()
 
         results = self.lexical_phrase_candidates(readings)
         if not results:

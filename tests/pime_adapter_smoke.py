@@ -1,4 +1,4 @@
-﻿"""Smoke-test PIME's editable multi-character composition buffer.
+"""Smoke-test PIME's editable multi-character composition buffer.
 
 Run with PIME's bundled 32-bit Python after building the overlay.  This file
 is deliberately not named ``test_*.py`` because the normal test runner is
@@ -2558,6 +2558,27 @@ def main() -> None:
                 label, "第一次 Shift 被吃掉了")
             tap_shift(uac_service, 2820)
             assert uac_service.english_mode is False, (label, "第二次沒切回來")
+
+        # --- libchewing 的詞語快取有上限 -----------------------------------
+        #
+        # 輸入法是長時間執行的行程。_trusted_phrase_cache 原本沒有上限，打得愈久
+        # 佔得愈多，沒有東西會把它收回去。這裡直接把它塞滿再多問一次，確認它真的
+        # 會被倒掉——不是靠讀程式碼相信。
+        from pinned_bopomofo.bopomofo_core.libchewing_provider import (
+            TRUSTED_PHRASE_CACHE_LIMIT,
+        )
+
+        cache_service = PinnedBopomofoTextService(DummyClient())
+        provider = cache_service.session.provider
+        cache = provider._trusted_phrase_cache
+        cache.clear()
+        for filler in range(TRUSTED_PHRASE_CACHE_LIMIT):
+            cache[("filler", str(filler))] = []
+        assert len(cache) == TRUSTED_PHRASE_CACHE_LIMIT, len(cache)
+        provider.trusted_phrase_candidates(["ㄨˇ", "ㄇㄣ˙"])
+        assert len(cache) <= TRUSTED_PHRASE_CACHE_LIMIT, (
+            "詞語快取沒有上限，長時間執行會一直長大", len(cache))
+        assert len(cache) > 0, "整份倒掉之後沒有把這一次的答案放回去"
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
