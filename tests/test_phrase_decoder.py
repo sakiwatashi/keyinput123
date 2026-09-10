@@ -185,9 +185,46 @@ class PersonalContextTests(unittest.TestCase):
         )
         self.assertEqual("再做", "".join(span.text for span in spans))
 
+    def test_a_learned_non_word_loses_to_the_word_it_corrupts(self) -> None:
+        """沒有人說「下一不」。真正的詞必須贏過同音的非詞。
+
+        實測的病徵：輸入法因為別的問題輸出「下一不」，使用者送出了，系統就學
+        起來。那筆條目不是詞、詞庫查不到，於是命中「自造詞豁免」無條件獲勝，
+        從此「下一步」再也打不出來——連單獨打都不行。
+        """
+        phrases = {("xia", "yi", "bu"): ["下一步"]}
+        weights = {"下一步": 5546}
+        spans = decode_phrase_lattice(
+            ["xia", "yi", "bu"],
+            "？？？",
+            [False] * 3,
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            lambda _readings, _context: ("下一不", False),
+        )
+        self.assertEqual("下一步", "".join(span.text for span in spans))
+
+    def test_the_same_learned_string_wins_once_the_context_matches(self) -> None:
+        # 擋下來的是「沒有佐證的個人條目」，不是個人條目本身。使用者真的想要
+        # 這個字串時，上下文吻合就照樣生效。
+        phrases = {("xia", "yi", "bu"): ["下一步"]}
+        weights = {"下一步": 5546}
+        spans = decode_phrase_lattice(
+            ["xia", "yi", "bu"],
+            "？？？",
+            [False] * 3,
+            lambda readings: phrases.get(tuple(readings), []),
+            lambda _readings, phrase: weights.get(phrase, 0),
+            lambda _readings, _context: ("下一不", True),
+        )
+        self.assertEqual("下一不", "".join(span.text for span in spans))
+
     def test_a_word_the_lexicon_does_not_know_always_wins(self) -> None:
         # 使用者自己的詞彙沒有「內建對手」可以輸給。少了這個豁免，人名之類的
         # 自造詞會因為權重 0 而永遠打不出來。
+        #
+        # 跟上面「下一不」的差別是差幾個字：橙柿 跟 城市 兩個字都不同，是另一
+        # 個詞；下一不 跟 下一步 只差一個字，是同一個詞壞掉的版本。
         self.assertEqual("橙柿", self.decode("橙柿", contextual=False))
 
     def test_context_is_the_decoded_left_neighbour(self) -> None:

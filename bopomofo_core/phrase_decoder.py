@@ -26,6 +26,31 @@ PersonalLookup = Callable[[List[str], str], "tuple[str, bool]"]
 PERSONAL_OVERRIDE_RATIO = 10
 
 
+def _is_near_miss(phrase: str, candidates: Sequence[str]) -> bool:
+    """Whether this looks like a real word with one character wrong.
+
+    A learned string that is not a word, but differs from a bundled word in a
+    single position, is almost always that word with one bad conversion in it
+    -- committed once while something else was misranked, then learned. 下一不
+    against 下一步 is one: nobody says 下一不, and once it was in the personal
+    index 下一步 could not be typed at all.
+
+    A string that differs everywhere is the opposite: a name, a coined term,
+    the user's own vocabulary. 橙柿 shares no character with 城市, and it has to
+    keep winning or the user cannot type their own words.
+
+    So the single differing character is the whole test. It separates "this is
+    a corrupted copy of a word" from "this is a different word".
+    """
+    for candidate in candidates:
+        if len(candidate) != len(phrase) or candidate == phrase:
+            continue
+        differences = sum(a != b for a, b in zip(phrase, candidate))
+        if differences == 1:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class DecodedSpan:
     start: int
@@ -142,16 +167,30 @@ def decode_phrase_lattice(
                     # the user never chose.
                     weight = best_bundled + 1
                     own = max(0, phrase_weight(span_readings, phrase))
-                    if not contextual and phrase in candidates:
-                        # No evidence this word belongs *here*, only that it was
+                    if not contextual and (
+                        phrase in candidates
+                        or _is_near_miss(phrase, candidates)
+                    ):
+                        # No evidence this belongs *here*, only that it was
                         # chosen for these readings once somewhere. That is how
                         # picking 程式 once turned 這座城市很美麗 into
                         # 這座程式很美麗: the pair outranked a word 36 times more
                         # common, in a sentence with nothing to do with it.
                         #
-                        # A word the lexicon does not know at all is exempt --
-                        # it is the user's own vocabulary and has no bundled
-                        # rival to lose to.
+                        # The test is whether the lexicon has an answer for this
+                        # span at all, not whether the personal entry is one of
+                        # them. An earlier version asked the latter, so a
+                        # learned string that is not a word skipped the check
+                        # entirely and won unconditionally: 下一不 was committed
+                        # once while the engine was misranking 不/步, learned,
+                        # and from then on 下一步 could not be typed at all.
+                        # Nobody says 下一不 -- a real word must outrank a
+                        # non-word for the same sound.
+                        #
+                        # A span the lexicon knows nothing about is still
+                        # exempt. That is the user's own vocabulary -- a name,
+                        # a coined term -- and it has no bundled rival to lose
+                        # to.
                         if own * PERSONAL_OVERRIDE_RATIO < best_bundled:
                             weight = own
                 else:
