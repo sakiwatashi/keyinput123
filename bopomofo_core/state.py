@@ -66,6 +66,22 @@ class BopomofoEditor:
     def is_empty(self) -> bool:
         return not self._slots
 
+    @property
+    def slots(self) -> dict[str, str]:
+        """Which component sits in each slot. A copy."""
+        return dict(self._slots)
+
+    @property
+    def edit_order(self) -> list[str]:
+        """Slot names in the order they were last written. A copy.
+
+        The caller needs this to tell two identical key sequences apart:
+        typing ㄧ then ㄒ (filling an empty initial -- free order, one syllable)
+        versus typing 一 then the next syllable (which shows up later as a
+        *replacement* of a slot that was not the most recent edit).
+        """
+        return list(self._edit_order)
+
     def input_symbol(self, symbol: str) -> Event:
         slot = slot_for(symbol)
         if slot is None:

@@ -2245,6 +2245,28 @@ def main() -> None:
                 "一聲音節被下一個字吃掉了",
             )
 
+        # 不照順序打仍然要能合併成一個音節。這是使用者每天在用的功能，而它跟
+        # 「打完一再打下一個字」是同一組按鍵——第一版用「聲母就開新音節」去修
+        # 「一」，把這個功能整個弄壞了：ㄧㄒㄣˋ 變成「依ㄒㄣˋ」。
+        #
+        # 補上的成分要在聲調之前。聲調會讓音節完整而立刻自動落字，那之後的
+        # 按鍵本來就屬於下一個字，跟順序無關。
+        for want, keys in (
+            ("信", "uvp4"),   # ㄧ ㄒ ㄣ ˋ  介音先打
+            ("信", "vup4"),   # ㄒ ㄧ ㄣ ˋ  正常順序
+            ("下", "u8v4"),   # ㄧ ㄚ ㄒ ˋ  聲母在聲調之前補上
+        ):
+            free = PinnedBopomofoTextService(DummyClient())
+            free.phrase_store = PhraseStore(
+                os.path.join(appdata, "freeorder-%s.json" % keys)
+            )
+            raw_keys(free, keys, 2970)
+            assert free.compositionString == want, (
+                "不照順序打不再合併成一個音節",
+                keys,
+                free.compositionString,
+            )
+
         # 聲調是例外：它是唯一後面沒有東西的成分，加上去必須繼續完成這個音節，
         # 不能開新的。少了這個豁免，每個字的最後一鍵都會另起一格。
         tone = PinnedBopomofoTextService(DummyClient())

@@ -5,7 +5,26 @@ from __future__ import annotations
 from typing import Protocol
 
 from .pinned_store import PinnedStore
-from .state import BopomofoEditor, Event, EventKind, TONES
+from .state import (
+    INITIALS,
+    MEDIALS,
+    RIMES,
+    TONES,
+    BopomofoEditor,
+    Event,
+    EventKind,
+)
+
+_BOPOMOFO_TEXT = INITIALS | MEDIALS | RIMES | TONES
+
+
+def _is_literal_bopomofo(text: str) -> bool:
+    """The engine's way of saying "this spelling has no character".
+
+    libchewing answers every spelling. For one Mandarin does not have, the
+    only candidate it offers is the Zhuyin itself.
+    """
+    return bool(text) and all(character in _BOPOMOFO_TEXT for character in text)
 
 
 class CandidateProvider(Protocol):
@@ -134,6 +153,34 @@ class CandidateSession:
         if not self._is_complete(reading):
             return True
         return bool(self._engine_candidates(reading) or self._valid_pins(reading))
+
+    def prefix_has_candidates(self, partial: str) -> bool:
+        """Whether any tone turns this partial spelling into a real syllable.
+
+        _validate only judges complete readings, so a partial one is always
+        accepted -- which is why ㄍ merged onto a pending ㄧ to make ㄍㄧ, a
+        combination Mandarin does not have. 一個 came out as ㄍㄧㄜˋ.
+
+        "Has candidates" is not enough on its own: the engine answers every
+        spelling, valid or not, and for an impossible one the only candidate is
+        the Zhuyin itself. ㄒㄧ returns 西/希, ㄍㄧ returns ㄍㄧ. A real Han
+        character is the signal.
+
+        Asking every tone is five engine lookups, so the caller must only reach
+        here when a symbol is about to be merged *out of order*; typing in the
+        normal order never needs the question.
+        """
+        if not partial:
+            return False
+        tones = (partial[-1],) if partial[-1:] in TONES else tuple("ˉˊˇˋ˙")
+        base = partial[:-1] if partial[-1:] in TONES else partial
+        return any(
+            any(
+                not _is_literal_bopomofo(candidate)
+                for candidate in self._engine_candidates(base + tone)
+            )
+            for tone in tones
+        )
 
     def _refresh(self) -> None:
         if not self._is_complete(self.preedit):

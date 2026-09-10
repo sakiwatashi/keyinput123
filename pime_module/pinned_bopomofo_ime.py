@@ -633,8 +633,9 @@ class PinnedBopomofoTextService(TextService):
 
         symbol = symbol_for_event(keyEvent.keyCode, keyEvent.charCode)
         if symbol is not None:
-            if self._starts_new_syllable(symbol):
-                self._close_pending_first_tone()
+            carry = self._carry_into_new_syllable(symbol)
+            if carry is not None:
+                self._close_syllable_before(carry)
             if symbol in TONES and not self.session.preedit:
                 self._emit_or_buffer_literal(symbol)
                 return True
@@ -1432,77 +1433,100 @@ class PinnedBopomofoTextService(TextService):
         self.setShowCandidates(False)
         self._render_buffer()
 
-    def _starts_new_syllable(self, symbol: str) -> bool:
-        """Whether this symbol belongs to the next syllable rather than this one.
+    def _carry_into_new_syllable(self, symbol: str) -> list[str] | None:
+        """Whether this symbol starts a new syllable, and what comes with it.
 
-        Bopomofo slots fill in one direction: initial, medial, rime, tone. A
-        symbol that cannot go *after* everything already typed is not part of
-        this syllable -- the user has moved on to the next one.
+        Returns None to keep editing the current syllable, otherwise the
+        components already typed that belong to the *new* one.
 
-        「一」 is why this matters. Its reading is a bare ㄧ with no tone mark, so
-        it never looks finished, and the slot editor folded whatever came next
-        into it. Typed straight through:
+        Two identical key sequences have to be told apart:
 
-            下一步  ㄧ + ㄅ -> ㄅㄧ, then ㄨ replaced ㄧ      -> 下部
-            一樣    ㄧ + ㄧ -> same slot, replaced           -> 樣
-            因為    ㄧㄣ + ㄨㄟ -> both slots replaced        -> 未
+            ㄧ ㄒ ㄣ ˋ    -> 信      one syllable, typed out of order
+            ㄧ ㄅ ㄨ ˋ    -> 一步    two syllables, typed straight through
 
-        Every one of them lost a character silently. 一個/一樣/一直/一起/下一步
-        are everywhere in ordinary text.
+        Both start with a medial and continue with an initial, so the initial
+        cannot be the signal. An earlier version split there and broke
+        out-of-order input, which this user relies on daily.
 
-        The same keystrokes are also the free-order feature (type ㄧ then ㄒ to
-        get ㄒㄧ), so only one of the two can win. This one does: typing a
-        component before the one that precedes it is a rare convenience, and
-        losing a character without a word is the worse failure.
+        The signal is *replacement*. Filling an empty slot is free-order input
+        and always merges. Overwriting a slot that is already filled means the
+        component being overwritten belonged to a syllable the user has already
+        finished: ㄨ landing on the ㄧ of 一 is the moment 一 is revealed to be
+        its own syllable. Two exceptions:
 
-        Tones are exempt. They are the one component with nothing after them,
-        so ``<=`` would only ever fire for a tone landing on a syllable that
-        already has one -- and splitting there would commit the syllable with
-        the wrong tone and strand the new one.
+        * Re-typing the slot that was just edited, with a different symbol, is
+          somebody fixing a typo, and keeps editing this syllable.
+        * Re-typing it with the *same* symbol fixes nothing, so it is not a fix.
+          ㄧ after ㄧ is 一 followed by another syllable (一樣).
 
-        That branch has no test. A toned syllable normally auto-accepts
-        immediately, so it is not pending when the second tone arrives; the one
-        state where it does stay pending is a reading whose first candidate is
-        literal Zhuyin (ㄑˋ), and every alternative tone for those is rejected
-        by the validator before this code is consulted. Kept because the
-        behaviour without it is plainly wrong if the state is ever reached, but
-        it is asserted by nothing -- do not read the surrounding tests as
-        covering it.
-
-        The cost: re-typing an initial no longer corrects a mistyped one, it
-        starts a new syllable. Backspace is the way to correct now, which is
-        what Microsoft Bopomofo does too.
+        What carries over: components edited after the overwritten slot that
+        sit earlier in the syllable. In 一步 the ㄅ was typed after the ㄧ but
+        belongs in front of it, so 一 commits alone and ㄅ starts the new
+        syllable. In 因為 the ㄣ was typed after the ㄧ and belongs behind it,
+        so 因 commits whole and nothing carries.
         """
         slot = slot_for(symbol)
         if slot is None or slot == "tone":
-            return False
-        pending = self.session.preedit
-        if not pending:
-            return False
-        # preedit is canonical, so its last character sits in the highest slot.
-        filled = slot_for(pending[-1])
-        if filled is None:
-            return False
-        return SLOT_ORDER.index(slot) <= SLOT_ORDER.index(filled)
+            return None
+        slots = self.session.editor.slots
+        if slot not in slots:
+            # 填空位。照順序往後填不必多問；只有填到已填欄位「前面」時，才需要
+            # 確認合出來的東西是不是真的存在——ㄍ 併到待決的 ㄧ 上會得到 ㄍㄧ，
+            # 而國語沒有這個組合，「一個」因此變成 ㄍㄧㄜˋ。
+            if any(
+                SLOT_ORDER.index(name) > SLOT_ORDER.index(slot) for name in slots
+            ):
+                merged = dict(slots)
+                merged[slot] = symbol
+                spelling = "".join(
+                    merged.get(name, "") for name in SLOT_ORDER
+                )
+                if not self.session.prefix_has_candidates(spelling):
+                    return []
+            return None
+        order = self.session.editor.edit_order
+        if order and order[-1] == slot and slots[slot] != symbol:
+            return None
+        position = order.index(slot) if slot in order else len(order)
+        return [
+            slots[name]
+            for name in order[position + 1 :]
+            if SLOT_ORDER.index(name) < SLOT_ORDER.index(slot)
+        ]
 
-    def _close_pending_first_tone(self) -> bool:
-        """Finish the pending syllable as first tone, the way Space would.
+    def _close_syllable_before(self, carry: list[str]) -> bool:
+        """Commit what is pending minus ``carry``, as first tone.
 
-        Returns False and leaves the editor untouched when that produces
-        nothing usable -- a partial spelling that is not a real syllable must
-        still be completable, so the caller falls back to the old merging
-        behaviour rather than eating the keystroke.
+        Returns False and puts the editor back exactly as it was when that
+        cannot produce a real character. A partial spelling has to stay
+        completable, so the caller falls back to merging rather than eating the
+        keystroke.
         """
-        event = self.session.input_symbol("ˉ")
-        usable = (
-            event.kind is EventKind.UPDATED
-            and self.session.candidates
-            and not self._is_literal_bopomofo(self.session.candidates[0])
-        )
-        if not usable:
-            self.session.backspace()
+        slots = self.session.editor.slots
+        keeping = [value for value in slots.values() if value not in carry]
+        if not keeping:
             return False
+
+        def in_slot_order(values):
+            return sorted(values, key=lambda value: SLOT_ORDER.index(slot_for(value)))
+
+        self.session.clear()
+        for value in in_slot_order(keeping):
+            self.session.input_symbol(value)
+        if not any(value in TONES for value in keeping):
+            self.session.input_symbol("ˉ")
+
+        if not self.session.candidates or self._is_literal_bopomofo(
+            self.session.candidates[0]
+        ):
+            self.session.clear()
+            for value in in_slot_order(slots.values()):
+                self.session.input_symbol(value)
+            return False
+
         self._accept_active_candidate(0)
+        for value in carry:
+            self.session.input_symbol(value)
         return True
 
     def _forget_conflicting_phrases(self, start: int, end: int, text: str) -> None:
