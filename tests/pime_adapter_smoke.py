@@ -28,7 +28,7 @@ from pinned_bopomofo.pinned_bopomofo_ime import (
 from pinned_bopomofo.bopomofo_core.context_store import ContextStore
 from pinned_bopomofo.bopomofo_core.word_usage import WordUsageStore
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
-from pinned_bopomofo.bopomofo_core.keymap import keys_for_reading
+from pinned_bopomofo.bopomofo_core.keymap import KEY_TO_SYMBOL, keys_for_reading
 from pinned_bopomofo.bopomofo_core.state import INITIALS, MEDIALS, RIMES
 from pime_all_readings_audit import audit_all_readings
 
@@ -2579,6 +2579,128 @@ def main() -> None:
         assert len(cache) <= TRUSTED_PHRASE_CACHE_LIMIT, (
             "詞語快取沒有上限，長時間執行會一直長大", len(cache))
         assert len(cache) > 0, "整份倒掉之後沒有把這一次的答案放回去"
+
+        # --- 空韻連著打是兩個音節，不是改錯字 -------------------------------
+        #
+        # ㄙ 和 ㄕ 都只填聲母欄。原本的規則是「剛編輯過的欄位又打了不同的符號
+        # ＝ 在改錯字」，於是第二個聲母把第一個蓋掉：打「私事」得到「是」，
+        # 打「知識」得到「十」——第一個音節整個消失。
+        #
+        # 一個孤零零的成分本身就是一個字，所以蓋掉它跟「打完了，換下一個」
+        # 分不出來，而後者常見得多。ㄓㄔㄕㄖㄗㄘㄙ 這七個聲母都能單獨成字。
+        empty_rime = PinnedBopomofoTextService(DummyClient())
+        empty_rime.handleRequest(
+            {"method": "onActivate", "seqNum": 3300, "isKeyboardOpen": False}
+        )
+        sequence = 3301
+        for character in ("n", "g", "4"):      # ㄙ ㄕ ˋ
+            press(empty_rime, character, sequence)
+            sequence += 1
+        reply = special_key(empty_rime, 0x0D, sequence)
+        assert reply["commitString"] == "私事", (
+            "空韻連著打被當成改錯字了", reply["commitString"])
+
+        # 聲母單獨不成字的時候，仍然是改錯字：ㄅ 拼不出漢字，所以 ㄆ 蓋掉它。
+        sequence += 1
+        fix_typo = PinnedBopomofoTextService(DummyClient())
+        fix_typo.handleRequest(
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
+        )
+        sequence += 1
+        for character in ("1", "q", "8", "3"):  # ㄅ ㄆ ㄚ ˇ
+            press(fix_typo, character, sequence)
+            sequence += 1
+        reply = special_key(fix_typo, 0x0D, sequence)
+        assert reply["commitString"] == "ㄆㄚˇ", (
+            "ㄅ 單獨不是字，ㄆ 應該蓋掉它", reply["commitString"])
+
+        # 音節裡還有別的成分時，蓋掉剛打的那一格仍然是改錯字：ㄉㄧ 打到一半
+        # 改成 ㄉㄨ，要得到「度」，不是「低」加上一個新音節。這一條是上面那個
+        # 條件的另一半——把例外整個拿掉，這裡會紅。
+        sequence += 1
+        medial_fix = PinnedBopomofoTextService(DummyClient())
+        medial_fix.handleRequest(
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
+        )
+        sequence += 1
+        for character in ("2", "u", "j", "4"):  # ㄉ ㄧ ㄨ ˋ
+            press(medial_fix, character, sequence)
+            sequence += 1
+        reply = special_key(medial_fix, 0x0D, sequence)
+        assert reply["commitString"] == "度", (
+            "改介音應該還是同一個音節", reply["commitString"])
+
+        # 任意順序輸入不能因此壞掉：ㄧ 之後的 ㄒ 填的是空欄位，走的不是同一條路。
+        sequence += 1
+        free_order = PinnedBopomofoTextService(DummyClient())
+        free_order.handleRequest(
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
+        )
+        sequence += 1
+        for character in ("u", "v", "p", "4"):  # ㄧ ㄒ ㄣ ˋ
+            press(free_order, character, sequence)
+            sequence += 1
+        reply = special_key(free_order, 0x0D, sequence)
+        assert reply["commitString"] == "信", (
+            "任意順序輸入壞了", reply["commitString"])
+
+        # --- 同欄位相撞：掃過全部組合 ---------------------------------------
+        #
+        # 「私事」變成「是」是一組發現的，但同樣的欄位相撞有 180 組。逐一打過，
+        # 而不是相信推理——那個缺陷本來就是推理出來的規則造成的。
+        #
+        # 聲母接介音（ㄓ 加 ㄨ）不算相撞，那本來就是同一個音節。只有落在同一個
+        # 欄位、而且符號不同的才進來。
+        by_symbol = {}
+        for pressed, produced in KEY_TO_SYMBOL.items():
+            by_symbol.setdefault(produced, pressed)
+
+        collision_groups = (
+            "ㄓㄔㄕㄖㄗㄘㄙ",          # 這幾個聲母單獨加聲調就是字
+            "ㄧㄨㄩ",
+            "ㄚㄛㄜㄞㄟㄠㄡㄢㄣㄤㄥㄦ",
+        )
+        # 這三個沒有第一聲的字：ㄖˉ、ㄟˉ、ㄦˉ 都拼不出漢字，所以前面那個音節
+        # 關不起來，只能退回改錯字。實際打字碰不到——它們必須帶聲調才是字，
+        # 而帶了聲調就正確（ㄖˋ ㄓˋ 得到「日誌」）。
+        no_first_tone = set("ㄖㄟㄦ")
+
+        sequence = 3400
+        merged = []
+        for group in collision_groups:
+            for first in group:
+                for second in group:
+                    if first == second:
+                        continue
+                    keys = (by_symbol.get(first), by_symbol.get(second), "4")
+                    if not all(keys):
+                        continue
+                    probe = PinnedBopomofoTextService(DummyClient())
+                    probe.handleRequest(
+                        {
+                            "method": "onActivate",
+                            "seqNum": sequence,
+                            "isKeyboardOpen": False,
+                        }
+                    )
+                    sequence += 1
+                    for character in keys:
+                        press(probe, character, sequence)
+                        sequence += 1
+                    # 第二個音節可能還在組字中，那也算一個。
+                    syllables = len(probe.segments) + (
+                        1 if probe.session.preedit else 0
+                    )
+                    if syllables < 2:
+                        merged.append((first, second))
+
+        unexpected = [
+            pair for pair in merged if pair[0] not in no_first_tone
+        ]
+        assert not unexpected, ("同欄位相撞被併成一個音節", unexpected)
+        # 反向也要釘住：如果哪天 ㄖ／ㄟ／ㄦ 也能關起來了，這裡會提醒去改上面
+        # 那份名單，而不是讓它默默失去意義。
+        assert merged, "沒有任何一組併音節，上面那份例外名單已經過時"
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

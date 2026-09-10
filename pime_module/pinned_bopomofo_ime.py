@@ -1515,7 +1515,13 @@ class PinnedBopomofoTextService(TextService):
         its own syllable. Two exceptions:
 
         * Re-typing the slot that was just edited, with a different symbol, is
-          somebody fixing a typo, and keeps editing this syllable.
+          somebody fixing a typo, and keeps editing this syllable — but only
+          when there is something else in the syllable. 一個孤零零的成分本身
+          就是一個字（ㄙ 是「思」、ㄧ 是「一」、ㄢ 是「安」），所以蓋掉它跟
+          「打完了，換下一個字」分不出來，而後者常見得多：打 ㄙ 再打 ㄕ
+          原本會讓 ㄙ 整個消失，「私事」變成「是」、「知識」變成「十」。
+          聲母單獨不成字的情況不必特別處理——ㄅ 拼不出漢字，
+          _close_syllable_before 會自己還原，於是 ㄅ 改成 ㄆ 仍然是改錯字。
         * Re-typing it with the *same* symbol fixes nothing, so it is not a fix.
           ㄧ after ㄧ is 一 followed by another syllable (一樣).
 
@@ -1549,7 +1555,12 @@ class PinnedBopomofoTextService(TextService):
                     return []
             return None
         order = self.session.editor.edit_order
-        if order and order[-1] == slot and slots[slot] != symbol:
+        if (
+            order
+            and order[-1] == slot
+            and slots[slot] != symbol
+            and len(slots) > 1
+        ):
             return None
         position = order.index(slot) if slot in order else len(order)
         return [
