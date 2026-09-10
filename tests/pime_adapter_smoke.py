@@ -2208,6 +2208,57 @@ def main() -> None:
             "跟選擇一致的條目竟然也被刪掉了"
         )
 
+        # 一聲的音節後面直接接下一個字，不按空白。
+        #
+        # 「一」的讀音是光禿禿的 ㄧ，沒有聲調符號，所以它永遠看起來沒打完，槽位
+        # 編輯器就把下一個字的注音併進去。連著打的實測結果：
+        #
+        #     下一步   ㄧ + ㄅ -> ㄅㄧ，接著 ㄨ 取代 ㄧ    -> 下部
+        #     一樣     ㄧ + ㄧ -> 同槽取代                -> 樣
+        #     因為     ㄧㄣ + ㄨㄟ -> 兩個槽都被取代        -> 未
+        #
+        # 每一個都無聲地少一個字。這裡刻意用原始按鍵而不是 type_readings——那個
+        # 輔助函式會在一聲後面補空白，正好繞過這個 bug，第一版就是這樣沒抓到。
+        def raw_keys(service, keys, sequence):
+            for key in keys:
+                press(service, key, sequence)
+                sequence += 1
+            return sequence
+
+        for want, readings in (
+            ("下一步", ["ㄒㄧㄚˋ", "ㄧ", "ㄅㄨˋ"]),
+            ("一樣", ["ㄧ", "ㄧㄤˋ"]),
+            ("因為", ["ㄧㄣ", "ㄨㄟˋ"]),
+            ("一個", ["ㄧ", "ㄍㄜˋ"]),
+            ("第一次", ["ㄉㄧˋ", "ㄧ", "ㄘˋ"]),
+        ):
+            boundary = PinnedBopomofoTextService(DummyClient())
+            boundary.phrase_store = PhraseStore(
+                os.path.join(appdata, "boundary-%s.json" % want)
+            )
+            keys = "".join(keys_for_reading(reading) for reading in readings)
+            raw_keys(boundary, keys, 2980)
+            assert boundary.compositionString == want, (
+                want,
+                keys,
+                boundary.compositionString,
+                "一聲音節被下一個字吃掉了",
+            )
+
+        # 聲調是例外：它是唯一後面沒有東西的成分，加上去必須繼續完成這個音節，
+        # 不能開新的。少了這個豁免，每個字的最後一鍵都會另起一格。
+        tone = PinnedBopomofoTextService(DummyClient())
+        tone.phrase_store = PhraseStore(os.path.join(appdata, "boundary-tone.json"))
+        raw_keys(tone, "vup4", 2990)  # ㄒ ㄧ ㄣ ˋ
+        assert len(tone.segments) == 1, (
+            "聲調竟然另起了一個音節",
+            tone.compositionString,
+            [segment.reading for segment in tone.segments],
+        )
+        assert tone.segments[0].reading == "ㄒㄧㄣˋ", (
+            tone.segments[0].reading
+        )
+
         # Moving back to the end must still append, and Backspace's own gap
         # must keep working -- that path was already correct.
         tail_service = PinnedBopomofoTextService(DummyClient())
