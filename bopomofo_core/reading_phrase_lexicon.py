@@ -15,6 +15,7 @@ from pathlib import Path
 DEFAULT_INDEX = Path(__file__).with_name("data") / "reading_phrases.json.gz"
 DEFAULT_DEMOTIONS = Path(__file__).with_name("data") / "variant_demotions.json"
 DEFAULT_POLYPHONES = Path(__file__).with_name("data") / "polyphone_weights.json"
+DEFAULT_EXTRA = Path(__file__).with_name("data") / "extra_phrases.json"
 
 # 簡轉繁留下的異體字繼承了常用字在語料裡的全部詞頻，高出兩到三個數量級：
 # 爲 211329 對 為 684，喫 65597 對 吃 805。除以這個數字就把它放回「罕用異體」
@@ -31,12 +32,14 @@ class ReadingPhraseLexicon:
         path: str | Path = DEFAULT_INDEX,
         demotions_path: str | Path = DEFAULT_DEMOTIONS,
         polyphones_path: str | Path = DEFAULT_POLYPHONES,
+        extra_path: str | Path = DEFAULT_EXTRA,
     ) -> None:
         self.path = Path(path)
         self.entry_count = 0
         self._entries: dict[str, list[list[object]]] = {}
         self._demoted = self._load_demotions(Path(demotions_path))
         self._polyphones = self._load_polyphones(Path(polyphones_path))
+        self._extra = self._load_extra(Path(extra_path))
         if not self.path.exists():
             return
         try:
@@ -103,13 +106,40 @@ class ReadingPhraseLexicon:
             return {}
 
     @staticmethod
+    def _load_extra(path: Path) -> dict[str, dict[str, int]]:
+        """補上游詞庫缺席的組合。缺檔就只用上游那一份。"""
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            entries = raw.get("entries", {})
+            if not isinstance(entries, dict):
+                return {}
+            return {
+                str(key): {
+                    str(phrase): int(weight) for phrase, weight in words.items()
+                }
+                for key, words in entries.items()
+                if isinstance(words, dict)
+            }
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
+    @staticmethod
     def _key(readings: list[str]) -> str:
         return " ".join(readings)
 
     def candidates(self, readings: list[str], limit: int = 20) -> list[str]:
         if not readings or limit <= 0:
             return []
-        rows = self._entries.get(self._key(readings), [])
+        key = self._key(readings)
+        rows = list(self._entries.get(key, []))
+        # 補的詞放在上游之後，再由下面的權重排序決定位置。上游沒有這個讀音時
+        # 這就是唯一的來源。
+        known = {row[0] for row in rows if isinstance(row, list) and len(row) == 2}
+        rows += [
+            [phrase, weight]
+            for phrase, weight in self._extra.get(key, {}).items()
+            if phrase not in known
+        ]
         def needs_reorder(row) -> bool:
             if not (isinstance(row, list) and len(row) == 2):
                 return False
@@ -120,6 +150,16 @@ class ReadingPhraseLexicon:
                 return True
             # 破音字的權重被換掉了，儲存順序是換掉之前的。
             return len(phrase) == 1 and phrase in self._polyphones
+
+        # 補的詞是接在上游後面的，位置跟權重無關。
+        if self._extra.get(key):
+            rows = sorted(
+                rows,
+                key=lambda row: self.weight(readings, row[0])
+                if isinstance(row, list) and len(row) == 2 and isinstance(row[0], str)
+                else 0,
+                reverse=True,
+            )
 
         if any(needs_reorder(row) for row in rows):
             # 這一列存的順序是原始權重的順序，降權改了權重卻改不到它。實測：
@@ -174,5 +214,5 @@ class ReadingPhraseLexicon:
                 # 它跟「詞庫根本沒有這個詞」無法區分，而那兩件事的後果不同。
                 return max(1, weight // VARIANT_DEMOTION_DIVISOR)
             return weight
-        return 0
+        return self._extra.get(self._key(readings), {}).get(phrase, 0)
 

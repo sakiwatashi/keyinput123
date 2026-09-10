@@ -110,3 +110,47 @@ class VariantDemotionTests(unittest.TestCase):
             path.write_text("{broken", encoding="utf-8")
             lexicon = ReadingPhraseLexicon(demotions_path=path)
             self.assertGreater(lexicon.entry_count, 100_000)
+
+
+class ExtraPhraseTests(unittest.TestCase):
+    """上游詞庫缺席的能產組合。
+
+    「這座城市」打成「蔗作城市」不是排序問題——詞庫裡根本沒有「這座」，只有
+    「蔗作」（146）。指示詞加量詞是能產格位，64 組裡缺 21 組，包括「每個」
+    「哪個」「這台」「那次」這些天天在用的。
+    """
+
+    def setUp(self) -> None:
+        self.lexicon = ReadingPhraseLexicon()
+
+    def test_a_missing_productive_combination_is_supplied(self) -> None:
+        for reading, phrase in (
+            (["ㄓㄜˋ", "ㄗㄨㄛˋ"], "這座"),
+            (["ㄇㄟˇ", "ㄍㄜˋ"], "每個"),
+            (["ㄋㄚˋ", "ㄘˋ"], "那次"),
+            (["ㄓㄜˋ", "ㄓㄤˉ"], "這張"),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(phrase, self.lexicon.candidates(reading)[0])
+
+    def test_the_supplied_word_outweighs_the_noise_it_replaces(self) -> None:
+        # 蔗作 是上游唯一的答案，權重 146。補的詞要贏得過它。
+        reading = ["ㄓㄜˋ", "ㄗㄨㄛˋ"]
+        self.assertGreater(
+            self.lexicon.weight(reading, "這座"),
+            self.lexicon.weight(reading, "蔗作"),
+        )
+
+    def test_a_combination_the_grammar_does_not_allow_is_not_supplied(self) -> None:
+        # 格位能產不代表每一格都成立。「麼」只接這／那／怎，沒有「哪麼」。
+        self.assertEqual(0, self.lexicon.weight(["ㄋㄚˇ", "ㄇㄜ˙"], "哪麼"))
+
+    def test_upstream_weights_are_not_overwritten(self) -> None:
+        # 詞庫已經有的組合不補，免得用一個扁平的數字蓋掉真實的詞頻。
+        reading = ["ㄓㄜˋ", "ㄍㄜˋ"]
+        self.assertEqual("這個", self.lexicon.candidates(reading)[0])
+        self.assertGreater(self.lexicon.weight(reading, "這個"), 100_000)
+
+    def test_a_missing_file_falls_back_to_upstream_only(self) -> None:
+        plain = ReadingPhraseLexicon(extra_path=Path("no-such-extra.json"))
+        self.assertEqual(0, plain.weight(["ㄓㄜˋ", "ㄗㄨㄛˋ"], "這座"))
