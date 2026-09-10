@@ -159,3 +159,78 @@ class PhoneticCorrectorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FuzzyEvidenceTests(unittest.TestCase):
+    """模糊路徑的證據要比精確路徑嚴。
+
+    打「六扇門」出來是「六三門」。ㄕㄢˋ 被換成 ㄙㄢˋ（ㄕ／ㄙ 混淆）之後，
+    寬鬆的證據來源不管聲調照樣回「三門」（真正讀音是 ㄙㄢˉ），於是一個猜出來
+    的讀音配上一個猜出來的詞就被放行了。三根本不是使用者打的那個音。
+    """
+
+    def setUp(self) -> None:
+        self.corrector = PhoneticCorrector()
+        self.columns = {"ㄕㄢˋ": ["善", "扇", "三"], "ㄇㄣˊ": ["門"]}
+
+        def candidate_lookup(reading: str) -> list[str]:
+            return list(self.columns.get(reading, []))
+
+        def phrase_lookup(columns: list[list[str]]) -> list[str]:
+            phrases = ["三門"]
+            return [
+                phrase
+                for phrase in phrases
+                if len(phrase) == len(columns)
+                and all(c in column for c, column in zip(phrase, columns))
+            ]
+
+        self.candidate_lookup = candidate_lookup
+        self.phrase_lookup = phrase_lookup
+
+    @staticmethod
+    def loose(readings: list[str]) -> list[str]:
+        # 不管聲調的來源：問它 ㄙㄢˋ ㄇㄣˊ 也回「三門」。
+        if readings[0].startswith("ㄙㄢ"):
+            return ["三門"]
+        return []
+
+    @staticmethod
+    def strict(readings: list[str]) -> list[str]:
+        # 以讀音為準：三門 只在 ㄙㄢˉ ㄇㄣˊ 底下。
+        if readings == ["ㄙㄢˉ", "ㄇㄣˊ"]:
+            return ["三門"]
+        return []
+
+    def correct(self, fuzzy_lookup):
+        return self.corrector.correct(
+            ["ㄕㄢˋ", "ㄇㄣˊ"],
+            "善門",
+            [False, False],
+            self.candidate_lookup,
+            self.phrase_lookup,
+            known_phrase_lookup=self.loose,
+            replacement_phrase_lookup=self.loose,
+            fuzzy_evidence_lookup=fuzzy_lookup,
+        )
+
+    def test_a_loose_source_lets_the_wrong_sound_through(self) -> None:
+        # 這一條記錄的是壞掉時的樣子。沒有它，下一條看不出在守什麼。
+        text, changes = self.correct(None)
+        self.assertEqual("三門", text)
+        self.assertTrue(changes[0].used_fuzzy_reading)
+
+    def test_reading_authoritative_evidence_refuses_it(self) -> None:
+        text, changes = self.correct(self.strict)
+        self.assertEqual("善門", text)
+        self.assertEqual([], changes)
+
+    def test_a_genuine_confusion_is_still_corrected(self) -> None:
+        # 收緊不能把模糊修正整個關掉：讀音真的差一格、而且那個讀音下確實有詞
+        # 的時候照樣要修。
+        def strict_at_the_typed_tone(readings: list[str]) -> list[str]:
+            return ["三門"] if readings == ["ㄙㄢˋ", "ㄇㄣˊ"] else []
+
+        text, changes = self.correct(strict_at_the_typed_tone)
+        self.assertEqual("三門", text)
+        self.assertTrue(changes[0].used_fuzzy_reading)

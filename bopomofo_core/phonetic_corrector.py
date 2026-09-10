@@ -84,6 +84,7 @@ class PhoneticCorrector:
         phrase_validator: PhraseValidator | None = None,
         allow_fuzzy: bool = True,
         replacement_phrase_lookup: KnownPhraseLookup | None = None,
+        fuzzy_evidence_lookup: KnownPhraseLookup | None = None,
     ) -> tuple[str, list[PhoneticCorrection]]:
         if len(readings) != len(text) or len(protected) != len(text):
             raise ValueError("readings, text, and protection mask must align")
@@ -148,18 +149,27 @@ class PhoneticCorrector:
                     fuzzy = False
                 elif allow_fuzzy:
                     fuzzy_phrases = phrase_lookup(expanded_columns[start:end])
-                    if evidence_lookup is not None:
+                    fuzzy_evidence = fuzzy_evidence_lookup or evidence_lookup
+                    if fuzzy_evidence is not None:
                         # Fuzzy correction is deliberately limited to one
                         # changed phonetic slot. Validate every proposed word
                         # against the exact phrase engine for that nearby
                         # reading, rather than trusting text-only corpus data.
+                        #
+                        # 這裡要的證據比精確路徑更嚴。精確路徑允許「詞庫沒收、
+                        # 但引擎認得又夠常見」的詞，因為使用者的讀音是確定的。
+                        # 模糊路徑的讀音本身就是猜的，再用一個寬鬆的來源背書，
+                        # 兩個猜測就疊起來了：打「六扇門」變成「六三門」——
+                        # ㄕㄢˋ 被換成 ㄙㄢˋ 之後，引擎不管聲調照樣回「三門」
+                        # （真正讀音是 ㄙㄢˉ），而只看字的詞頻表認得「三門」，
+                        # 於是放行。三根本不是使用者打的那個音。
                         known_fuzzy: set[str] = set()
                         for offset, reading in enumerate(span_readings):
                             for variant in reading_variants(reading)[1:]:
                                 variant_readings = list(span_readings)
                                 variant_readings[offset] = variant
                                 known_fuzzy.update(
-                                    evidence_lookup(variant_readings)
+                                    fuzzy_evidence(variant_readings)
                                 )
                         fuzzy_phrases = [
                             phrase

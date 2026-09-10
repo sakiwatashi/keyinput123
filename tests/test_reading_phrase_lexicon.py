@@ -402,3 +402,82 @@ class MissingVocabularyTests(unittest.TestCase):
             self.assertEqual(
                 [], plain.candidates(readings), f"{' '.join(readings)} 原本就有詞"
             )
+
+
+class ParticleReadingTests(unittest.TestCase):
+    """語氣詞不該霸佔它本調讀音的第一名。
+
+    語料把「我們」「他們」記成 ㄨㄛˇ ㄇㄣˊ（Rime 那一份的標音慣例），於是
+    「們」在 ㄇㄣˊ 底下拿到 66889，壓過「門」的 15692——打「六扇門」得到
+    「六扇們」。台灣打字時「們」一律是輕聲 ㄇㄣ˙，打 ㄇㄣˊ 就是要「門」。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_character_that_owns_the_sound_comes_first(self) -> None:
+        for reading, expected in (
+            ("ㄇㄣˊ", "門"),
+            ("ㄇㄚˉ", "媽"),
+            ("ㄇㄚˇ", "馬"),
+            ("ㄅㄚˉ", "八"),
+            ("ㄌㄚˉ", "拉"),
+            ("ㄇㄚˊ", "麻"),
+            ("ㄇㄛˊ", "魔"),
+            ("ㄋㄧˊ", "尼"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates([reading], 1)[0],
+                f"{reading} 的第一個候選不是「{expected}」",
+            )
+
+    def test_the_particle_is_still_reachable(self) -> None:
+        # 壓低不是刪掉。要打的人往下捲一格還是找得到。
+        for reading, particle in (("ㄇㄣˊ", "們"), ("ㄅㄚˉ", "吧"), ("ㄋㄧˊ", "呢")):
+            self.assertIn(particle, self.lexicon.candidates([reading]))
+
+    def test_the_words_that_use_the_particle_are_untouched(self) -> None:
+        """壓低的只有單字權重。多字詞有自己的條目。"""
+        for readings, expected in (
+            (["ㄨㄛˇ", "ㄇㄣ˙"], "我們"),
+            (["ㄨㄛˇ", "ㄇㄣˊ"], "我們"),
+            (["ㄊㄚˉ", "ㄇㄣ˙"], "他們"),
+            (["ㄐㄧㄡˇ", "ㄅㄚˉ"], "酒吧"),
+            (["ㄇㄚˇ", "ㄈㄟˉ"], "嗎啡"),
+            (["ㄕㄣˊ", "ㄇㄜ˙"], "什麼"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 被弄壞了",
+            )
+
+    def test_an_ordinary_character_at_its_own_tone_is_left_alone(self) -> None:
+        """護欄：「有輕聲讀音」不足以判斷。這幾個在本調下本來就是對的。
+
+        把清單改成「凡是有輕聲讀音的字都壓低」，這裡就會紅。
+        """
+        for reading, expected in (
+            ("ㄒㄧㄚˋ", "下"),
+            ("ㄍㄜˋ", "個"),
+            ("ㄊㄡˊ", "頭"),
+            ("ㄌㄧㄠˇ", "了"),
+            ("ㄗˇ", "子"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates([reading], 1)[0],
+                f"{reading} 本來就該給「{expected}」",
+            )
+
+
+class ProperNounTests(unittest.TestCase):
+    def test_a_known_term_the_corpus_lacks_can_be_typed(self) -> None:
+        # 「六扇門」的讀音鍵原本整個是空的，只能逐字拼。
+        lexicon = ReadingPhraseLexicon()
+        self.assertEqual(
+            "六扇門",
+            lexicon.candidates(["ㄌㄧㄡˋ", "ㄕㄢˋ", "ㄇㄣˊ"], 1)[0],
+        )

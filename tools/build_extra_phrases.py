@@ -63,6 +63,7 @@ POSITIONAL = {"邊": "ㄅㄧㄢ", "裡": "ㄌㄧˇ", "些": "ㄒㄧㄝ", "麼": 
 # 不會把任何既有的詞擠下去。
 VOCABULARY = {
     ("玄", "幻"): ("ㄒㄩㄢˊ", "ㄏㄨㄢˋ"),
+    ("六", "扇", "門"): ("ㄌㄧㄡˋ", "ㄕㄢˋ", "ㄇㄣˊ"),
     ("修", "仙"): ("ㄒㄧㄡ", "ㄒㄧㄢ"),
     ("浮", "空"): ("ㄈㄨˊ", "ㄎㄨㄥ"),
     ("仰", "躺"): ("ㄧㄤˇ", "ㄊㄤˇ"),
@@ -79,8 +80,8 @@ def normalize(reading: str) -> str:
     return reading if reading[-1] in "ˉˊˇˋ˙" else reading + "ˉ"
 
 
-def candidate_pairs() -> dict[tuple[str, str], tuple[str, str]]:
-    pairs: dict[tuple[str, str], tuple[str, str]] = {}
+def candidate_pairs() -> dict[tuple[str, ...], tuple[str, ...]]:
+    pairs: dict[tuple[str, ...], tuple[str, ...]] = {}
     for head, head_reading in DEMONSTRATIVES.items():
         for tail, tail_reading in CLASSIFIERS.items():
             pairs[(head, tail)] = (head_reading, tail_reading)
@@ -101,9 +102,10 @@ def main() -> int:
 
     added: dict[str, dict[str, int]] = {}
     skipped = 0
-    for (head, tail), (head_reading, tail_reading) in sorted(candidate_pairs().items()):
-        key = f"{normalize(head_reading)} {normalize(tail_reading)}"
-        phrase = head + tail
+    # 不限兩個字：格位組合都是兩個字，但底下的常用詞清單有三個字的（六扇門）。
+    for characters, readings in sorted(candidate_pairs().items()):
+        key = " ".join(normalize(reading) for reading in readings)
+        phrase = "".join(characters)
         existing = {
             row[0]
             for row in entries.get(key, [])

@@ -1129,6 +1129,12 @@ class PinnedBopomofoTextService(TextService):
                     replacement_phrase_lookup=(
                         self.session.trusted_phrase_candidates
                     ),
+                    # 模糊路徑只認詞庫。trusted 那一份包含「引擎認得又夠常見」
+                    # 的後備，而引擎在被問一個猜出來的讀音時不管聲調照樣回答，
+                    # 於是「六扇門」會變成「六三門」。
+                    fuzzy_evidence_lookup=(
+                        self.session.lexical_phrase_candidates
+                    ),
                 )
                 suggestion, typo_changes = self.autocorrector.correct(
                     suggestion, protected

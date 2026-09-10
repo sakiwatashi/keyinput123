@@ -53,6 +53,29 @@ OUTPUT = (
 # 區分，而那兩件事的後果不同——這個字還是要選得到，只是排在最後。
 UNUSED_READING_WEIGHT = 1
 
+# 語氣詞在本調讀音下的例外。
+#
+# 按證據拆分之後還是會錯的一類：語料把「我們」「他們」記成 ㄨㄛˇ ㄇㄣˊ（Rime
+# 那一份的標音慣例），於是「們」在 ㄇㄣˊ 底下拿到 66889，壓過「門」的 15692，
+# 打「六扇門」得到「六扇們」。台灣打字時「們」一律是輕聲 ㄇㄣ˙，打 ㄇㄣˊ 就是
+# 要「門」。整組語氣詞都有同樣的情形。
+#
+# 這裡不能用機械判準。「有輕聲讀音」不足以區分：下@ㄒㄧㄚˋ、個@ㄍㄜˋ、
+# 頭@ㄊㄡˊ、了@ㄌㄧㄠˇ（了解）、子@ㄗˇ 在本調下都是對的。只列確認過「台灣
+# 打這個音時不會是要這個字」的組合。
+#
+# 壓低的是單字權重。多字詞有自己的條目，不受影響——我們、他們、酒吧、嗎啡
+# 都照樣打得出來。
+PARTICLE_ONLY_READINGS = {
+    "們": ("ㄇㄣˊ",),    # 門
+    "嗎": ("ㄇㄚˉ", "ㄇㄚˇ"),  # 媽、馬
+    "吧": ("ㄅㄚˉ",),    # 八
+    "啦": ("ㄌㄚˉ",),    # 拉
+    "嘛": ("ㄇㄚˊ",),    # 麻
+    "麼": ("ㄇㄛˊ",),    # 魔
+    "呢": ("ㄋㄧˊ",),    # 尼
+}
+
 
 def load_entries() -> dict[str, list]:
     with gzip.open(DEFAULT_INDEX, "rt", encoding="utf-8") as stream:
@@ -110,6 +133,49 @@ def find_unsplit(entries: dict[str, list]) -> dict[str, dict[str, int]]:
     }
 
 
+def single_character_weights(entries: dict[str, list]) -> dict[str, dict[str, int]]:
+    """每個單字讀音底下有哪些字、原始權重多少。"""
+    by_reading: dict[str, dict[str, int]] = defaultdict(dict)
+    for key, rows in entries.items():
+        if " " in key:
+            continue
+        for row in rows:
+            if (
+                isinstance(row, list)
+                and len(row) == 2
+                and isinstance(row[0], str)
+                and len(row[0]) == 1
+            ):
+                try:
+                    by_reading[key][row[0]] = int(row[1])
+                except (TypeError, ValueError):
+                    continue
+    return by_reading
+
+
+def demote_particles(
+    entries: dict[str, list], corrections: dict[str, dict[str, int]]
+) -> None:
+    """把語氣詞壓到本調讀音的真正主人後面。
+
+    壓到「第二名減一」而不是壓到底：目的是讓它不再排第一，不是把它藏起來。
+    要打的人往下捲一格還是找得到。
+    """
+    by_reading = single_character_weights(entries)
+    for character, readings in PARTICLE_ONLY_READINGS.items():
+        for reading in readings:
+            rivals = [
+                corrections.get(other, {}).get(reading, weight)
+                for other, weight in by_reading.get(reading, {}).items()
+                if other != character
+            ]
+            if not rivals:
+                continue
+            corrections.setdefault(character, {})[reading] = max(
+                UNUSED_READING_WEIGHT, max(rivals) - 1
+            )
+
+
 def build() -> dict[str, object]:
     entries = load_entries()
     evidence = reading_evidence(entries)
@@ -137,11 +203,12 @@ def build() -> dict[str, object]:
             reading: max(UNUSED_READING_WEIGHT, int(total * share / strongest))
             for reading, share in shares.items()
         }
+    demote_particles(entries, corrections)
     return {
         "version": 1,
         "note": (
             "破音字的每讀音權重。內建索引把總詞頻掛在每個讀音上，這裡按"
-            "多字詞的證據重新分配。"
+            "多字詞的證據重新分配，再套上語氣詞的人工例外。"
         ),
         "unused_reading_weight": UNUSED_READING_WEIGHT,
         "characters": corrections,
