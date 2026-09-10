@@ -17,6 +17,7 @@ DEFAULT_DEMOTIONS = Path(__file__).with_name("data") / "variant_demotions.json"
 DEFAULT_POLYPHONES = Path(__file__).with_name("data") / "polyphone_weights.json"
 DEFAULT_EXTRA = Path(__file__).with_name("data") / "extra_phrases.json"
 DEFAULT_SANDHI = Path(__file__).with_name("data") / "tone_sandhi.json"
+DEFAULT_TAIWAN = Path(__file__).with_name("data") / "taiwan_preferred.json"
 
 # 簡轉繁留下的異體字繼承了常用字在語料裡的全部詞頻，高出兩到三個數量級：
 # 爲 211329 對 為 684，喫 65597 對 吃 805。除以這個數字就把它放回「罕用異體」
@@ -41,12 +42,16 @@ class ReadingPhraseLexicon:
         polyphones_path: str | Path = DEFAULT_POLYPHONES,
         extra_path: str | Path = DEFAULT_EXTRA,
         sandhi_path: str | Path = DEFAULT_SANDHI,
+        taiwan_path: str | Path = DEFAULT_TAIWAN,
     ) -> None:
         self.path = Path(path)
         self.entry_count = 0
         self._entries: dict[str, list[list[object]]] = {}
         self._demoted = self._load_demotions(Path(demotions_path))
         self._polyphones = self._load_polyphones(Path(polyphones_path))
+        # 同音不同寫法時台灣寫法優先。形狀跟 _extra 一樣（讀音 -> 詞 -> 權重），
+        # 但用途相反：這裡是蓋掉語料已經有的權重，不是補語料沒有的詞。
+        self._taiwan = self._load_extra(Path(taiwan_path))
         self._extra = self._load_extra(Path(extra_path))
         # 變調唸法補在同一個備援表裡：兩者都是「上游詞庫查不到，但使用者真的
         # 會這樣打」。手工列的那份優先，免得規則產生的資料蓋掉刻意挑的權重。
@@ -153,6 +158,11 @@ class ReadingPhraseLexicon:
             corrected = self._polyphones.get(phrase, {}).get(reading)
             if corrected is not None:
                 weight = corrected
+        preferred = self._taiwan.get(reading, {}).get(phrase)
+        if preferred is not None:
+            # 台灣寫法排前面。放在破音字之後：這張表是按 (讀音, 詞) 指定的，
+            # 比按 (字, 讀音) 拆出來的破音字權重更明確。
+            weight = preferred
         if self._demoted and any(
             character in self._demoted for character in phrase
         ):

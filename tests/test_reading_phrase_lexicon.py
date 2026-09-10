@@ -299,3 +299,67 @@ class ToneSandhiTests(unittest.TestCase):
         self.assertNotIn("一個", plain.candidates(["ㄧˊ", "ㄍㄜˋ"]))
         self.assertEqual([], plain.candidates(["ㄅㄨˋ", "ㄕˋ"]))
         self.assertIn("一個", plain.candidates(["ㄧˉ", "ㄍㄜˋ"]))
+
+
+class TaiwanPreferredTests(unittest.TestCase):
+    """同音不同寫法時，台灣的寫法要排前面。
+
+    上游語料是大陸語料轉製的，同一個詞的兩種寫法都在裡面，而大陸那一種帶著
+    全部的詞頻：賬戶 16605 對 帳戶 2876，界面 14436 對 介面 588。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_taiwan_spelling_comes_first(self) -> None:
+        for readings, expected in (
+            (["ㄐㄧㄝˋ", "ㄇㄧㄢˋ"], "介面"),
+            (["ㄓㄤˋ", "ㄏㄨˋ"], "帳戶"),
+            (["ㄐㄧㄝˊ", "ㄓㄤˋ"], "結帳"),
+            (["ㄓㄨㄢˇ", "ㄓㄤˋ"], "轉帳"),
+            (["ㄕㄣˉ", "ㄈㄣˋ"], "身分"),
+            (["ㄕㄣˉ", "ㄈㄣˋ", "ㄓㄥˋ"], "身分證"),
+            (["ㄧˋ", "ㄉㄚˋ", "ㄌㄧˋ"], "義大利"),
+            (["ㄇㄚˊ", "ㄅㄧˋ"], "麻痺"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 的第一個候選不是台灣寫法",
+            )
+
+    def test_the_other_spelling_is_still_available(self) -> None:
+        # 對調不是刪除。要打大陸寫法的人照樣選得到，只是不排第一。
+        self.assertIn("界面", self.lexicon.candidates(["ㄐㄧㄝˋ", "ㄇㄧㄢˋ"]))
+        self.assertIn("賬戶", self.lexicon.candidates(["ㄓㄤˋ", "ㄏㄨˋ"]))
+
+    def test_a_same_sounding_word_that_is_already_correct_is_left_alone(self) -> None:
+        """這一組是護欄，不是功能測試。
+
+        用字級替換自動掃會炸：「下麵」會贏過「下面」，「錶面」會贏過「表面」。
+        同音不代表同義，所以那份清單只收確認過整族都沒有例外的字。把它改成
+        通則，這裡就會紅。
+        """
+        for readings, expected in (
+            (["ㄒㄧㄚˋ", "ㄇㄧㄢˋ"], "下面"),
+            (["ㄅㄧㄠˇ", "ㄇㄧㄢˋ"], "表面"),
+            (["ㄓㄡˉ", "ㄉㄠˋ"], "周到"),
+            (["ㄓˋ", "ㄘㄞˊ"], "制裁"),
+            (["ㄓㄨㄢˉ", "ㄓㄨˋ"], "專注"),
+            (["ㄏㄨㄟˊ", "ㄍㄨㄟˉ"], "回歸"),
+            (["ㄊㄞˊ", "ㄨㄢˉ"], "台灣"),
+            (["ㄊㄞˊ", "ㄅㄟˇ"], "台北"),
+            (["ㄧˊ", "ㄈㄣˋ"], "一份"),
+            (["ㄩㄝˋ", "ㄈㄣˋ"], "月份"),
+            (["ㄍㄨˇ", "ㄈㄣˋ"], "股份"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 本來就是對的，不該被改掉",
+            )
+
+    def test_a_missing_file_falls_back_to_the_corpus_order(self) -> None:
+        plain = ReadingPhraseLexicon(taiwan_path=Path("no-such-taiwan.json"))
+        self.assertEqual("界面", plain.candidates(["ㄐㄧㄝˋ", "ㄇㄧㄢˋ"], 1)[0])
