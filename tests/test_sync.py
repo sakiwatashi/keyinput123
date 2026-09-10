@@ -121,6 +121,19 @@ class MergeHiddenTests(unittest.TestCase):
         merged = merge_hidden({}, {"minimum_frequency": 5})
         self.assertEqual(5, merged["minimum_frequency"])
 
+    def test_fields_this_merge_does_not_understand_are_kept(self) -> None:
+        # 實測：合併把控制台寫進 hidden-characters.json 的 "version" 洗掉了，
+        # 因為原本的實作直接回傳一個只含三個已知鍵的新字典。同步不該擅自認定
+        # 哪些欄位沒有用——那是寫進去的那支程式才知道的事。
+        merged = merge_hidden(
+            {"version": 1, "hidden": ["恣"], "note": "本機的"},
+            {"version": 1, "hidden": ["孳"], "future_flag": True},
+        )
+        self.assertEqual(1, merged["version"])
+        self.assertEqual("本機的", merged["note"])
+        self.assertTrue(merged["future_flag"])
+        self.assertEqual(["孳", "恣"], merged["hidden"])
+
 
 class SyncDirectoriesTests(unittest.TestCase):
     def _write(self, root: Path, name: str, value) -> None:

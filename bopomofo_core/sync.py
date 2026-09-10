@@ -275,11 +275,17 @@ def merge_hidden(
         + len(always - characters(remote, "always_show")),
     )
 
-    return {
-        "hidden": sorted(hidden),
-        "always_show": sorted(always),
-        "minimum_frequency": floor,
-    }
+    # 從本機那份複製起走，只覆蓋這裡管的三個鍵。直接回傳一個新字典會把檔案裡
+    # 其他欄位默默丟掉——實測就把控制台寫的 "version" 洗掉了。同步不該擅自決定
+    # 哪些欄位「沒有用」，那是寫進去的那支程式才知道的事。
+    merged = dict(local)
+    merged["hidden"] = sorted(hidden)
+    merged["always_show"] = sorted(always)
+    merged["minimum_frequency"] = floor
+    for key, value in remote.items():
+        if key not in merged:
+            merged[key] = value
+    return merged
 
 
 # ---- whole-directory sync ---------------------------------------------------

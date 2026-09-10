@@ -158,13 +158,18 @@ $guide.Dispose()
 # --- 4. 壞掉的模組不會拖垮控制台 ----------------------------------------
 # 真的放一個壞檔進去再跑整個殼，而不是只檢查程式碼裡有 try/catch。
 $broken = Join-Path $moduleDirectory "99-broken-smoke-fixture.ps1"
+# 數量從實際的模組檔數推導，不要寫死。寫死的那一版在新增分頁時會失敗，而它
+# 抱怨的是「壞掉的模組拖垮了控制台」——跟真正的原因毫無關係，訊息本身也早就
+# 跟數字對不上了（寫著「三個模組」卻在檢查 4）。
+$moduleCount = @(Get-ChildItem -LiteralPath $moduleDirectory -Filter "*.ps1" -File).Count
 try {
     Set-Content -LiteralPath $broken -Encoding UTF8 -Value 'throw "測試用的故意失敗"'
     $output = & $shell -NoShow 2>&1 | Out-String
-    Assert-True ($output -match "modules=5") "壞掉的模組應仍被列出並以錯誤分頁呈現，實際輸出：$output"
+    Assert-True ($output -match "modules=$($moduleCount + 1)") `
+        "壞掉的模組應仍被列出並以錯誤分頁呈現，實際輸出：$output"
     Assert-True ($output -match "buildFailures=0") "只有載入失敗的模組不該再產生建構失敗：$output"
     Assert-True ($output -match "載入失敗") "壞掉的模組沒有被標示為載入失敗：$output"
-    foreach ($name in @("狀態", "個人詞庫", "使用說明", "候選字過濾")) {
+    foreach ($name in @("狀態", "個人詞庫", "使用說明", "候選字過濾", "同步")) {
         Assert-True ($output -match $name) "壞掉的模組拖垮了「$name」分頁：$output"
     }
 }
@@ -174,7 +179,7 @@ finally {
 
 # --- 5. 正常情況 ---------------------------------------------------------
 $output = & $shell -NoShow 2>&1 | Out-String
-Assert-True ($output -match "modules=4") "預期載入三個模組：$output"
+Assert-True ($output -match "modules=$moduleCount") "預期載入 $moduleCount 個模組：$output"
 Assert-True ($output -notmatch "載入失敗") "正常情況不該有模組載入失敗：$output"
 # 建構失敗的分頁標題是正常的，只有內容變成錯誤訊息，所以必須另外檢查 ——
 # 少了這一項，20-lexicon 在閉包裡呼叫不到輔助函式的 bug 就矇混過關了。
@@ -184,4 +189,4 @@ if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Output "FAIL: $failure" }
     throw "control_panel_smoke 有 $($failures.Count) 項失敗。"
 }
-Write-Output "PASS: 控制台外殼、四個模組、按鍵表與 Python 原始碼一致、壞模組隔離"
+Write-Output "PASS: 控制台外殼、$moduleCount 個模組、按鍵表與 Python 原始碼一致、壞模組隔離"

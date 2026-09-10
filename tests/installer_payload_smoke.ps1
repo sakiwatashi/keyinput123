@@ -157,4 +157,61 @@ if ($contextProblems.Count -gt 0) {
     throw ("Shortcut location is wrong for a machine-wide install:`n  " + ($contextProblems -join "`n  "))
 }
 
-Write-Output "PASS: installer scripts are packaged, free of control characters, and their Windows paths resolve"
+# --- 控制台叫得到的 tools\ 檔案，都必須跟著模組一起裝 ---------------------
+#
+# build_pime_overlay.ps1 的 tools\ 是逐檔列舉的，不是整個資料夾複製。控制台
+# 新增一顆呼叫 tools\ 底下工具的按鈕、卻忘了加進那份名單，在原始碼樹上跑一切
+# 正常——因為原始碼樹裡那個檔案就在。使用者機器上則是按了顯示「找不到檔案」，
+# 而且要等到有人真的去按才會發現。
+$projectRoot = Split-Path -Parent $installerRoot
+$overlayPath = Join-Path $projectRoot "build_pime_overlay.ps1"
+if (-not (Test-Path -LiteralPath $overlayPath)) {
+    throw "找不到 build_pime_overlay.ps1：$overlayPath"
+}
+# 只看真正的複製動作，不看註解。第一版拿整個檔案做子字串比對，於是「註解裡
+# 提到檔名」就足以讓檢查通過——把那行 Copy-Item 刪掉、只留上面解釋它的註解，
+# 測試照樣是綠的。那等於沒有在檢查。
+$shipped = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+foreach ($line in [IO.File]::ReadAllLines($overlayPath)) {
+    if ($line -match '^\s*#') { continue }
+    foreach ($match in [regex]::Matches($line, 'tools\\([A-Za-z0-9_.\-]+\.(?:ps1|py))')) {
+        $shipped.Add($match.Groups[1].Value) | Out-Null
+    }
+}
+
+$controlPanelFiles = @()
+$controlPanelRoot = Join-Path $projectRoot "control_panel"
+if (Test-Path -LiteralPath $controlPanelRoot) {
+    $controlPanelFiles = @(Get-ChildItem -LiteralPath $controlPanelRoot -Filter *.ps1 -File -Recurse)
+}
+
+$referenced = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+foreach ($file in $controlPanelFiles) {
+    $text = [IO.File]::ReadAllText($file.FullName)
+    # 兩種寫法都要抓：Join-Path "tools" "x.py"，以及訊息裡的 tools\x.py。
+    foreach ($pattern in @(
+        '"tools"\s+"([A-Za-z0-9_.\-]+\.(?:ps1|py))"',
+        'tools\\([A-Za-z0-9_.\-]+\.(?:ps1|py))')) {
+        foreach ($match in [regex]::Matches($text, $pattern)) {
+            $referenced.Add($match.Groups[1].Value) | Out-Null
+        }
+    }
+}
+
+$notShipped = @()
+foreach ($name in $referenced) {
+    if (-not $shipped.Contains($name)) {
+        $notShipped += $name
+    }
+}
+if ($notShipped.Count -gt 0) {
+    throw ("控制台會呼叫這些 tools\ 檔案，但 build_pime_overlay.ps1 沒有把它們裝進去：`n  " +
+        ($notShipped -join "`n  "))
+}
+if ($referenced.Count -eq 0) {
+    throw "沒有從控制台掃到任何 tools\ 參照，這個檢查等於沒有在檢查"
+}
+
+Write-Output "PASS: installer scripts are packaged, free of control characters, their Windows paths resolve, and every tools\ file the control panel calls ships with it"

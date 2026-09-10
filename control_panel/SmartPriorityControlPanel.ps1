@@ -80,10 +80,20 @@ function New-SmartPriorityContext {
         if (Test-Path -LiteralPath $candidate) { $moduleRoot = $candidate }
     }
 
+    # PIME 自帶的 Python。模組要用它跑輸入法自己的程式碼，規則才不會有第二份。
+    # 解析在這裡做一次：模組各自解析時，測試就沒有辦法指定一個能跑的直譯器，
+    # 只能驗「按下去不會爆」，驗不到接線本身是否真的通。
+    $pythonPath = $null
+    if ($pimeRoot) {
+        $candidate = Join-Path $pimeRoot (Join-Path "python" (Join-Path "python3" "python.exe"))
+        if (Test-Path -LiteralPath $candidate) { $pythonPath = $candidate }
+    }
+
     [pscustomobject]@{
         StateRoot     = $stateRoot
         PimeRoot      = $pimeRoot
         ModuleRoot    = $moduleRoot
+        PythonPath    = $pythonPath
         LauncherPath  = if ($pimeRoot) { Join-Path $pimeRoot "PIMELauncher.exe" } else { $null }
         CandidateUi   = Join-Path $stateRoot "candidate-ui.json"
         PhrasesPath   = Join-Path $stateRoot "phrases.json"
