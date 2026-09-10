@@ -76,6 +76,40 @@ def special_key(service, key_code: int, sequence: int) -> dict:
     return reply
 
 
+def oem_key(service, key_code: int, char_code: int, sequence: int) -> dict:
+    """Press a key by virtual-key code the way TSF actually delivers one.
+
+    filterKeyDown runs first and decides whether the input method sees the key
+    at all; onKeyDown only runs when it said yes. Calling onKeyDown alone --
+    which is what every other helper here does -- cannot observe that half, so
+    a key the filter refuses still looks handled. Reverting the filter to its
+    old behaviour left this test green until it went through both.
+
+    Returns both replies so a caller can tell "the filter refused it" from
+    "the handler did the wrong thing with it".
+    """
+    key_states = [0] * 256
+    key_states[key_code] = 0x80
+    message = {
+        "seqNum": sequence,
+        "charCode": char_code,
+        "keyCode": key_code,
+        "repeatCount": 1,
+        "scanCode": 0,
+        "isExtended": False,
+        "keyStates": key_states,
+    }
+    filtered = service.handleRequest(dict(message, method="filterKeyDown"))
+    assert filtered["success"]
+    if not filtered["return"]:
+        return {"filtered": False, "handled": False}
+    handled = service.handleRequest(
+        dict(message, method="onKeyDown", seqNum=sequence + 1)
+    )
+    assert handled["success"]
+    return {"filtered": True, "handled": handled["return"]}
+
+
 def modified_key(
     service,
     key_code: int,
@@ -1973,6 +2007,93 @@ def main() -> None:
                 caret_service.compositionString,
                 expected,
             )
+
+        # 沒有注音的鍵（' = [ ] \ `）打在組字中間，字元要插在游標處。
+        #
+        # filterKeyDown 最後一行只認得注音符號，這六個鍵於是完全沒被接手：
+        # Windows 把原始字元直接交給應用程式，而組字區還在畫面上佔著一段範圍，
+        # 字元就落在那段之後——使用者看到的是「跑到最右邊」。
+        #
+        # 諷刺的是 _shift_ascii 的說明早就寫著這個理由，只是當初只套用在按住
+        # Shift 的那一半：Shift+' 的 " 會正確插在游標處，單獨的 ' 卻不會。
+        for label, key_code, char_code, character in (
+            ("單引號", 0xDE, 0x27, "'"),
+            ("等號", 0xBB, 0x3D, "="),
+            ("左中括號", 0xDB, 0x5B, "["),
+            ("反引號", 0xC0, 0x60, "`"),
+        ):
+            oem_service = PinnedBopomofoTextService(DummyClient())
+            oem_service.phrase_store = PhraseStore(
+                os.path.join(appdata, "oem-%d-phrases.json" % char_code)
+            )
+            oem_sequence = type_readings(
+                oem_service, ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], 2800
+            )
+            assert oem_service.compositionString == "我們好", oem_service.compositionString
+            special_key(oem_service, 0x25, oem_sequence)  # VK_LEFT -> 我們|好
+            oem_sequence += 1
+
+            reply = oem_key(oem_service, key_code, char_code, oem_sequence)
+            oem_sequence += 2
+            assert reply["filtered"], (
+                label,
+                "filterKeyDown 沒有認領這個鍵，輸入法根本收不到它，"
+                "Windows 會把字元交給應用程式插在組字區之後",
+            )
+            assert reply["handled"], (label, "onKeyDown 沒有處理這個鍵")
+            assert oem_service.compositionString == "我們%s好" % character, (
+                label,
+                oem_service.compositionString,
+            )
+            # 插進去之後還要能繼續編輯，這是選「插進組字區」而不是「送出」的重點。
+            assert oem_service.isComposing(), (label, "插入符號後組字被結束了")
+
+        # 沒有在組字時必須維持原樣交還給應用程式。那時候字元本來就會落在正確的
+        # 位置，搶下來只會平白改掉行為——而且會擋住應用程式自己對這些鍵的處理。
+        idle_service = PinnedBopomofoTextService(DummyClient())
+        idle_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "oem-idle-phrases.json")
+        )
+        assert not idle_service.isComposing()
+        idle_reply = idle_service.handleRequest(
+            {
+                "method": "filterKeyDown",
+                "seqNum": 2890,
+                "charCode": 0x27,
+                "keyCode": 0xDE,
+                "repeatCount": 1,
+                "scanCode": 0,
+                "isExtended": False,
+                "keyStates": [0] * 256,
+            }
+        )
+        assert idle_reply["return"] is False, (
+            "沒有組字時竟然搶走了 '，應用程式收不到這個鍵",
+            idle_reply,
+        )
+
+        # 英文模式一律放行，這些鍵不該變成例外。
+        english_service = PinnedBopomofoTextService(DummyClient())
+        english_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "oem-english-phrases.json")
+        )
+        english_service.english_mode = True
+        english_reply = english_service.handleRequest(
+            {
+                "method": "filterKeyDown",
+                "seqNum": 2891,
+                "charCode": 0x27,
+                "keyCode": 0xDE,
+                "repeatCount": 1,
+                "scanCode": 0,
+                "isExtended": False,
+                "keyStates": [0] * 256,
+            }
+        )
+        assert english_reply["return"] is False, (
+            "英文模式下竟然攔截了 '",
+            english_reply,
+        )
 
         # Moving back to the end must still append, and Backspace's own gap
         # must keep working -- that path was already correct.

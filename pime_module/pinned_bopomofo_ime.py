@@ -417,7 +417,13 @@ class PinnedBopomofoTextService(TextService):
             return bool(self.segments) and not self.session.preedit
         if keyEvent.keyCode in (VK_RETURN, VK_BACK, VK_ESCAPE):
             return self.isComposing()
-        return symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None
+        if symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None:
+            return True
+        # A key carrying no Bopomofo is ours only while something is being
+        # composed. With an empty buffer the application receives it in the
+        # right place already, so claiming it would change behaviour for no
+        # gain.
+        return self.isComposing() and self._unmapped_ascii(keyEvent) is not None
 
     def onKeyDown(self, keyEvent):
         if self.pending_shift_toggle:
@@ -624,6 +630,11 @@ class PinnedBopomofoTextService(TextService):
             self.reading_open = False
             self._handle_session_event(event)
             return True
+
+        unmapped = self._unmapped_ascii(keyEvent)
+        if unmapped is not None and self.isComposing():
+            self._emit_or_buffer_literal(unmapped)
+            return True
         return False
 
     def filterKeyUp(self, keyEvent):
@@ -755,6 +766,34 @@ class PinnedBopomofoTextService(TextService):
         if 0x20 <= keyEvent.charCode <= 0x7E:
             return chr(keyEvent.charCode)
         return SHIFTED_ASCII_FALLBACK.get(keyEvent.keyCode)
+
+    def _unmapped_ascii(self, keyEvent) -> str | None:
+        """The character on a key that carries no Bopomofo symbol.
+
+        Six keys on a standard board have no Bopomofo on them -- ``'``, ``=``,
+        ``[``, ``]``, ``\\`` and ``` ` ``` -- and a custom layout can free up
+        more, so the set is derived rather than listed.
+
+        Left unclaimed, these fall through to the application while the
+        composition is still on screen, and the character lands after the whole
+        buffer instead of at the caret: typing ``'`` at 我們|好 put it at the
+        far right rather than between 們 and 好.
+
+        That is the reasoning ``_shift_ascii`` already documents. It was only
+        ever applied to the shifted half, which is why ``Shift+'`` inserted a
+        quotation mark at the caret correctly while a bare ``'`` did not.
+        """
+        if self._shift_held(keyEvent):
+            return None
+        if symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None:
+            return None
+        # charCode already reflects the active keyboard layout. No fallback
+        # table here on purpose: without a charCode there is no way to know
+        # what an unmapped key prints, and guessing would type the wrong
+        # character rather than the nothing it types today.
+        if 0x20 <= keyEvent.charCode <= 0x7E:
+            return chr(keyEvent.charCode)
+        return None
 
     def _temporary_english_letter(self, keyEvent) -> str | None:
         """Return the ASCII letter produced by Shift+A-Z.
