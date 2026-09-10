@@ -1565,6 +1565,18 @@ class PinnedBopomofoTextService(TextService):
                 remembered = self.phrase_store.exact(readings)
                 if not remembered:
                     continue
+                # 只怪罪畫面上這段文字真正的來源。
+                #
+                # 第一版只要條目在被改的位置上跟新選擇不同就刪，於是使用者在
+                # 別的詞裡選一個字，會連帶刪掉一個剛好涵蓋同一段讀音、但跟畫面
+                # 無關的條目。實測損失了 `ㄧˉ ㄅㄨˋ -> 一步`：使用者在某處選了
+                # 「不」，而那筆條目當時根本沒有參與組字。
+                current = "".join(
+                    segment.text
+                    for segment in self.segments[span_start:span_end]
+                )
+                if remembered != current:
+                    continue
                 chosen = remembered[start - span_start : end - span_start]
                 if chosen != text:
                     self.phrase_store.forget(readings)

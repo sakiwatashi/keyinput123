@@ -14,6 +14,7 @@ from pathlib import Path
 
 DEFAULT_INDEX = Path(__file__).with_name("data") / "reading_phrases.json.gz"
 DEFAULT_DEMOTIONS = Path(__file__).with_name("data") / "variant_demotions.json"
+DEFAULT_POLYPHONES = Path(__file__).with_name("data") / "polyphone_weights.json"
 
 # 簡轉繁留下的異體字繼承了常用字在語料裡的全部詞頻，高出兩到三個數量級：
 # 爲 211329 對 為 684，喫 65597 對 吃 805。除以這個數字就把它放回「罕用異體」
@@ -29,11 +30,13 @@ class ReadingPhraseLexicon:
         self,
         path: str | Path = DEFAULT_INDEX,
         demotions_path: str | Path = DEFAULT_DEMOTIONS,
+        polyphones_path: str | Path = DEFAULT_POLYPHONES,
     ) -> None:
         self.path = Path(path)
         self.entry_count = 0
         self._entries: dict[str, list[list[object]]] = {}
         self._demoted = self._load_demotions(Path(demotions_path))
+        self._polyphones = self._load_polyphones(Path(polyphones_path))
         if not self.path.exists():
             return
         try:
@@ -76,6 +79,30 @@ class ReadingPhraseLexicon:
             return frozenset()
 
     @staticmethod
+    def _load_polyphones(path: Path) -> dict[str, dict[str, int]]:
+        """每讀音的正確權重。缺檔或壞檔就用索引裡原本的數字。
+
+        跟異體字名單一樣，這只調整排序，不是輸入法能不能啟動的必要條件。
+        """
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            characters = raw.get("characters", {})
+            if not isinstance(characters, dict):
+                return {}
+            return {
+                character: {
+                    str(reading): int(weight)
+                    for reading, weight in readings.items()
+                }
+                for character, readings in characters.items()
+                if isinstance(character, str)
+                and len(character) == 1
+                and isinstance(readings, dict)
+            }
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
+    @staticmethod
     def _key(readings: list[str]) -> str:
         return " ".join(readings)
 
@@ -83,13 +110,18 @@ class ReadingPhraseLexicon:
         if not readings or limit <= 0:
             return []
         rows = self._entries.get(self._key(readings), [])
-        if self._demoted and any(
-            isinstance(row, list)
-            and len(row) == 2
-            and isinstance(row[0], str)
-            and any(character in self._demoted for character in row[0])
-            for row in rows
-        ):
+        def needs_reorder(row) -> bool:
+            if not (isinstance(row, list) and len(row) == 2):
+                return False
+            phrase = row[0]
+            if not isinstance(phrase, str):
+                return False
+            if self._demoted and any(c in self._demoted for c in phrase):
+                return True
+            # 破音字的權重被換掉了，儲存順序是換掉之前的。
+            return len(phrase) == 1 and phrase in self._polyphones
+
+        if any(needs_reorder(row) for row in rows):
             # 這一列存的順序是原始權重的順序，降權改了權重卻改不到它。實測：
             # 這裏 降到 120、這裡 是 2791，順序卻還是 ['這裏', '這裡']，而下游
             # 取的是第一個，所以「這裡」照樣打成「這裏」。
@@ -128,6 +160,13 @@ class ReadingPhraseLexicon:
                 weight = max(0, int(row[1]))
             except (TypeError, ValueError):
                 return 0
+            # 破音字的每讀音權重先算。索引裡存的是這個字的**總**詞頻，掛在它
+            # 每一個讀音上；這裡換成按多字詞證據分配後的值。之後才輪到異體字
+            # 降權，兩者可以疊加。
+            if len(phrase) == 1:
+                corrected = self._polyphones.get(phrase, {}).get(readings[0])
+                if corrected is not None:
+                    weight = corrected
             if self._demoted and any(
                 character in self._demoted for character in phrase
             ):

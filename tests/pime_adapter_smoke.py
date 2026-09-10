@@ -2206,6 +2206,26 @@ def main() -> None:
             heal_service.phrase_store.exact(heal_readings),
         )
 
+        # 跟畫面無關的條目不能被連帶刪掉。
+        #
+        # 第一版只要條目在被改的位置上跟新選擇不同就刪。實測因此損失了
+        # `ㄧˉ ㄅㄨˋ -> 一步`：那筆條目當時沒有參與組字（畫面上是別的字），
+        # 只是剛好涵蓋同一段讀音，卻被當成兇手。
+        bystander = PinnedBopomofoTextService(DummyClient())
+        bystander.phrase_store = PhraseStore(
+            os.path.join(appdata, "bystander-phrases.json")
+        )
+        other = ["ㄧˉ", "ㄅㄨˋ"]     # ㄧˉ ㄅㄨˋ
+        bystander.phrase_store.learn(other, "一步")   # 一步
+        type_readings(bystander, other, 2975)
+        # 畫面上這一段是「一不」，不是那筆條目說的「一步」。
+        force_composition_text(bystander, "一不")
+        bystander._apply_candidate_choice(CandidateChoice("不", 1, 2))
+        assert bystander.phrase_store.exact(other) == "一步", (
+            "跟畫面無關的條目被連帶刪掉了",
+            bystander.phrase_store.exact(other),
+        )
+
         # 跟這次選擇一致的條目不能被誤刪，否則使用者選一次字就會清掉自己的詞庫。
         keep_service = PinnedBopomofoTextService(DummyClient())
         keep_service.phrase_store = PhraseStore(
