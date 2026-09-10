@@ -37,8 +37,29 @@ class DummyClient:
     isWindows8Above = True
 
 
+# 標點鍵的實體鍵碼。ord() 對字母數字剛好等於虛擬鍵碼，對標點不是：ord(".") 是
+# 0x2E，而 0x2E 是 VK_DELETE。骨架因此把句點鍵（ㄡ 所在的鍵）送成了 Delete 鍵，
+# 於是「Del 刪掉游標右邊」的處理一加上去，打 ㄡ 就變成刪字。
+#
+# 真實的 Windows 送 keyCode=VK_OEM_PERIOD、charCode=0x2E；Delete 鍵送
+# keyCode=0x2E、charCode=0。這張表就是那個差別。
+PUNCTUATION_KEY_CODES = {
+    ";": 0xBA,
+    "=": 0xBB,
+    ",": 0xBC,
+    "-": 0xBD,
+    ".": 0xBE,
+    "/": 0xBF,
+    "`": 0xC0,
+    "[": 0xDB,
+    "\\": 0xDC,
+    "]": 0xDD,
+    "'": 0xDE,
+}
+
+
 def key_message(character: str, sequence: int) -> dict:
-    key_code = ord(character.upper())
+    key_code = PUNCTUATION_KEY_CODES.get(character, ord(character.upper()))
     key_states = [0] * 256
     key_states[key_code] = 0x80
     return {
@@ -2206,6 +2227,57 @@ def main() -> None:
         assert heal_service.phrase_store.exact(heal_readings) == "", (
             "跟使用者選擇牴觸的個人詞條沒有被丟掉，下次組字它又會贏回來",
             heal_service.phrase_store.exact(heal_readings),
+        )
+
+        # Del 要刪掉游標右邊那一格，而且刪掉就不能再回來。
+        #
+        # 原本 filterKeyDown 沒有認領 VK_DELETE，按鍵直接交給應用程式：畫面上的
+        # 字消失了，而輸入法的 segments 一格都沒少。下一次重繪就把它畫回來——
+        # 使用者看到的是「刪掉的字又自己跑出來」。
+        def delete_key(service, sequence):
+            message = dict(key_message("x", sequence), keyCode=0x2E, charCode=0)
+            claimed = service.handleRequest(
+                dict(message, method="filterKeyDown")
+            )["return"]
+            if claimed:
+                service.handleRequest(
+                    dict(message, method="onKeyDown", seqNum=sequence + 1)
+                )
+            return claimed
+
+        deleting = PinnedBopomofoTextService(DummyClient())
+        deleting.phrase_store = PhraseStore(os.path.join(appdata, "del-phrases.json"))
+        del_seq = type_readings(
+            deleting, ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"], 2870
+        )
+        assert deleting.compositionString == "我們好", deleting.compositionString
+        special_key(deleting, 0x25, del_seq)          # VK_LEFT
+        del_seq += 1
+        assert delete_key(deleting, del_seq), (
+            "Del 沒有被認領，按鍵會直接交給應用程式，輸入法的緩衝區不會跟著改"
+        )
+        del_seq += 2
+        assert deleting.compositionString == "我們", deleting.compositionString
+
+        # 關鍵：刪掉之後再打字，被刪的字不能重新出現。
+        del_seq = type_readings(deleting, ["ㄉㄚˋ"], del_seq)
+        assert deleting.compositionString == "我們大", (
+            "被刪掉的字在下一次打字時又跑回來了",
+            deleting.compositionString,
+        )
+
+        # 游標已經在最右邊時，右邊沒有東西可以刪，緩衝區不能變。
+        tail_del = PinnedBopomofoTextService(DummyClient())
+        tail_del.phrase_store = PhraseStore(os.path.join(appdata, "del-tail.json"))
+        tail_seq = type_readings(
+            tail_del, ["ㄨㄛˇ", "ㄇㄣ˙"], 2880
+        )
+        before_tail = tail_del.compositionString
+        delete_key(tail_del, tail_seq)
+        assert tail_del.compositionString == before_tail, (
+            "游標在最右邊時 Del 竟然刪掉了東西",
+            before_tail,
+            tail_del.compositionString,
         )
 
         # 「一律隱藏」的字不能從詞網格溜進組字區。

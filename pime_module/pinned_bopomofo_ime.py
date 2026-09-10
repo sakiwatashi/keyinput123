@@ -452,7 +452,7 @@ class PinnedBopomofoTextService(TextService):
             return self._has_candidate_target()
         if keyEvent.keyCode in (VK_LEFT, VK_RIGHT):
             return bool(self.segments) and not self.session.preedit
-        if keyEvent.keyCode in (VK_RETURN, VK_BACK, VK_ESCAPE):
+        if keyEvent.keyCode in (VK_RETURN, VK_BACK, VK_ESCAPE, VK_DELETE):
             return self.isComposing()
         if symbol_for_event(keyEvent.keyCode, keyEvent.charCode) is not None:
             return True
@@ -639,6 +639,32 @@ class PinnedBopomofoTextService(TextService):
                 self._render_buffer()
                 return True
             return False
+
+        if keyEvent.keyCode == VK_DELETE:
+            if not self.isComposing():
+                return False
+            # 刪游標右邊那一格。游標畫在 focus_index 之後，所以右邊是它 +1。
+            #
+            # 沒有這一段的時候 Del 根本沒被認領，按鍵直接交給應用程式：畫面上
+            # 的字消失了，而輸入法的 segments 一格都沒少。下一次重繪就把它畫
+            # 回來——使用者看到的是「刪掉的字又自己跑出來」。
+            index = (
+                self.focus_index + 1 if self.focus_index is not None else len(self.segments)
+            )
+            if not 0 <= index < len(self.segments):
+                self._bell("游標右邊沒有可以刪除的文字")
+                return True
+            self.segments.pop(index)
+            # 跟 Backspace 一樣，把缺口留成下一個注音的插入點，不要讓它跑到最右邊。
+            self.replacement_index = index
+            self.reading_open = False
+            if not self.segments:
+                self.focus_index = None
+            else:
+                self.focus_index = min(self.focus_index or 0, len(self.segments) - 1)
+            self._apply_phrase_ranking()
+            self._render_buffer()
+            return True
 
         if keyEvent.keyCode == VK_RETURN:
             if not self.isComposing():
