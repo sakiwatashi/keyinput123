@@ -39,12 +39,12 @@
         $toggle.AutoSize = $true
         $toggle.Margin = New-Object System.Windows.Forms.Padding(4, 10, 4, 2)
 
-        # 讀音相近就替你改字（ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ、ㄣ／ㄥ）。實測 1200 組
-        # 隨機的兩音節組合只觸發 23 次，而且幾乎每次都對——做出、紙張、冒充、
-        # 撕裂、敬老。代價是偶爾會改掉你本來就打對的字：ㄙ 加 ㄕ 沒有對應的詞，
-        # 它就會挑讀音差一格而存在的「絲絲」。你打的字仍在候選裡，只是不排第一。
+        # 讀音相近就替你改字（ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ、ㄣ／ㄥ）。預設關閉。
+        # 它會改掉你本來就打對的字：ㄙ 加 ㄕ 沒有對應的詞，它就挑讀音差一格而
+        # 存在的「絲絲」；「六扇門」會變成「六三們」。錯別字修正是另一回事
+        # （以經→已經），住在 common_typos.json，跟這個開關無關，永遠開著。
         $phoneticToggle = New-Object System.Windows.Forms.CheckBox
-        $phoneticToggle.Text = "讀音相近時自動改字（ㄓㄗ、ㄔㄘ、ㄕㄙ、ㄣㄥ）"
+        $phoneticToggle.Text = "讀音相近時自動改字（ㄓㄗ、ㄔㄘ、ㄕㄙ、ㄣㄥ）；預設關閉"
         $phoneticToggle.AutoSize = $true
         $phoneticToggle.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
 
@@ -88,34 +88,22 @@
         # Add-Row、Get-CandidateUiEnabled 一個都找不到，連 $toggle 都是 null——
         # 「重新整理」的實際效果是把表格清空然後什麼都填不回去。
         # GetNewClosure 只複製**變數**，不複製 function，所以助手必須是變數。
-        # 兩個偏好的規則一樣：只有明確的 enabled:false 會關閉，檔案不存在或
-        # 損壞一律視為開啟。這條規則必須與 Python 那一側一致
-        # （candidate_ui_client.py 與 phonetic_preference.py）。
+        # 兩個偏好的檔案格式一樣，但預設值相反，所以預設值要傳進來：
+        #   候選視窗    預設開啟（candidate_ui_client.py）
+        #   讀音改字    預設關閉（phonetic_preference.py）
+        # 這兩個預設值必須與 Python 那一側一致，不然控制台顯示的狀態會騙人。
         $getEnabled = {
-            param([string]$path)
+            param([string]$path, [bool]$fallback)
             # 殼跟模組可能不同步（使用者裝了新模組、舊殼還在），少一個欄位不該
             # 讓整個分頁變成錯誤面板。缺路徑就當成預設值。
-            if ([string]::IsNullOrWhiteSpace($path)) { return $true }
-            if (-not (Test-Path -LiteralPath $path)) { return $true }
+            if ([string]::IsNullOrWhiteSpace($path)) { return $fallback }
+            if (-not (Test-Path -LiteralPath $path)) { return $fallback }
             try {
                 $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($null -ne $value.enabled) { return [bool]$value.enabled }
-                return $true
+                return $fallback
             }
-            catch { return $true }
-        }
-
-        $getCandidateUiEnabled = {
-            param([string]$path)
-            # 預設開啟：只有明確的 enabled:false 會關閉，檔案不存在或損壞一律
-            # 視為開啟。這條規則必須與 bopomofo_core\candidate_ui_client.py 一致。
-            if (-not (Test-Path -LiteralPath $path)) { return $true }
-            try {
-                $value = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($null -ne $value.enabled) { return [bool]$value.enabled }
-                return $true
-            }
-            catch { return $true }
+            catch { return $fallback }
         }
 
         $addRow = {
@@ -169,16 +157,16 @@
             & $addRow $(if ($Context.PimeRoot) { "存在" } else { "找不到" }) "PIME 安裝位置" `
                 $(if ($Context.PimeRoot) { $Context.PimeRoot } else { "登錄檔沒有有效的 Software\PIME" })
 
-            $enabled = & $getCandidateUiEnabled $Context.CandidateUi
+            $enabled = & $getEnabled $Context.CandidateUi $true
             $source = if (Test-Path -LiteralPath $Context.CandidateUi) { $Context.CandidateUi } else { "偏好檔不存在（預設開啟）" }
             & $addRow $(if ($enabled) { "啟用" } else { "關閉" }) "行程外候選視窗" $source
             $toggle.Checked = $enabled
 
-            $phonetic = & $getEnabled $Context.PhoneticFix
+            $phonetic = & $getEnabled $Context.PhoneticFix $false
             $phoneticSource = if (
                 -not [string]::IsNullOrWhiteSpace($Context.PhoneticFix) -and
                 (Test-Path -LiteralPath $Context.PhoneticFix)
-            ) { $Context.PhoneticFix } else { "偏好檔不存在（預設開啟）" }
+            ) { $Context.PhoneticFix } else { "偏好檔不存在（預設關閉）" }
             & $addRow $(if ($phonetic) { "啟用" } else { "關閉" }) `
                 "讀音相近時自動改字" $phoneticSource
             $phoneticToggle.Checked = $phonetic

@@ -574,6 +574,14 @@ def main() -> None:
         # High-confidence offline corrections become visible sentence
         # candidates before Enter and never write the surrounding sentence to
         # a store or network service.
+        # 讀音相近自動改字現在預設關閉——這個專案要的自動修正是錯別字
+        # （以經→已經），不是拿 ㄣ／ㄥ 去猜另一個詞。功能還在，這一段明確
+        # 打開它來測；下面測完就把偏好檔刪掉，免得影響後面的測試。
+        phonetic_preference_file = os.path.join(
+            preference_root, "phonetic-correction.json"
+        )
+        with open(phonetic_preference_file, "w", encoding="utf-8") as handle:
+            handle.write('{"enabled": true}')
         autocorrect_service = PinnedBopomofoTextService(DummyClient())
         autocorrect_sequence = type_readings(
             autocorrect_service,
@@ -603,6 +611,7 @@ def main() -> None:
             autocorrect_service, 0x0D, autocorrect_sequence
         )
         assert autocorrect_reply["commitString"] == "我應該不會去"
+        os.remove(phonetic_preference_file)
 
         visible_override = PinnedBopomofoTextService(DummyClient())
         override_sequence = type_readings(
@@ -2702,13 +2711,15 @@ def main() -> None:
         # 那份名單，而不是讓它默默失去意義。
         assert merged, "沒有任何一組併音節，上面那份例外名單已經過時"
 
-        # --- 讀音相近時自動改字，可以關掉 -----------------------------------
+        # --- 讀音相近時自動改字：預設關閉，可以打開 -------------------------
         #
-        # 台灣人常把 ㄕ／ㄙ 混在一起，所以打 ㄧㄣ ㄍㄞ 會得到「應該」。實測 1200
-        # 組隨機的兩音節組合只觸發 23 次，幾乎每次都對。但它偶爾會改掉本來就打
-        # 對的字：ㄙˉ ㄕˉ 沒有對應的詞，它就挑讀音差一格而存在的「絲絲」。
+        # 這個專案要的自動修正是錯別字（以經→已經），那是等長、無歧義的精確
+        # 替換，跟這裡無關。把 ㄓ／ㄗ、ㄕ／ㄙ、ㄣ／ㄥ 當成可能打錯再去猜另一個
+        # 詞是另一回事：它會改掉本來就打對的字——ㄙˉ ㄕˉ 沒有對應的詞，它就
+        # 挑讀音差一格而存在的「絲絲」。所以預設關閉。
         #
-        # 這是偏好不是對錯，所以給一個開關。預設開啟。
+        # 序號要接著上面用下去。倒退回一個用過的號碼，PIME 會把那些按鍵當成
+        # 過期的請求丟掉，測試就會拿到看不懂的結果（實測：以拎）。
         preference_file = os.path.join(preference_root, "phonetic-correction.json")
 
         def type_si_shi(service, start):
@@ -2717,21 +2728,48 @@ def main() -> None:
                 start += 1
             return special_key(service, 0x0D, start)["commitString"]
 
-        with open(preference_file, "w", encoding="utf-8") as handle:
-            handle.write('{"enabled": false}')
-        disabled = PinnedBopomofoTextService(DummyClient())
-        disabled.handleRequest(
-            {"method": "onActivate", "seqNum": 3500, "isKeyboardOpen": False}
-        )
-        assert type_si_shi(disabled, 3501) == "思師", "關掉之後還是改了字"
-
-        os.remove(preference_file)
+        if os.path.exists(preference_file):
+            os.remove(preference_file)
+        sequence += 1
         by_default = PinnedBopomofoTextService(DummyClient())
         by_default.handleRequest(
-            {"method": "onActivate", "seqNum": 3520, "isKeyboardOpen": False}
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
         )
-        assert type_si_shi(by_default, 3521) == "絲絲", (
-            "偏好檔不存在時應該是開啟的")
+        sequence += 1
+        assert type_si_shi(by_default, sequence) == "思師", "預設應該是關閉的"
+        sequence += 10
+
+        with open(preference_file, "w", encoding="utf-8") as handle:
+            handle.write('{"enabled": true}')
+        turned_on = PinnedBopomofoTextService(DummyClient())
+        turned_on.handleRequest(
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
+        )
+        sequence += 1
+        assert type_si_shi(turned_on, sequence) == "絲絲", "打開之後沒有生效"
+        sequence += 10
+        os.remove(preference_file)
+
+        # 錯別字修正不受這個開關影響——那才是這個專案要的自動修正。
+        #
+        # 用「不同凡想→不同凡響」而不是「以經→已經」：以經那一條詞排序自己就
+        # 會修對，拿它當測試證明不了 autocorrector 有在跑（實測把 autocorrector
+        # 換成空殼，測試照樣通過）。這一條不一樣，關掉修正會得到「不同煩想」。
+        # 69 條規則裡只有這一條在這個路徑上分得出差別。
+        typo = PinnedBopomofoTextService(DummyClient())
+        typo.handleRequest(
+            {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
+        )
+        sequence += 1
+        sequence = type_readings(
+            typo,
+            ["\u3105\u3128\u02ca", "\u310a\u3128\u3125\u02ca", "\u3108\u3122\u02ca", "\u3112\u3127\u3124\u02c7"],
+            sequence,
+        )
+        force_composition_text(typo, "\u4e0d\u540c\u51e1\u60f3", locked=False)
+        typo_reply = special_key(typo, 0x0D, sequence)
+        assert typo_reply["commitString"] == "\u4e0d\u540c\u51e1\u97ff", (
+            "錯別字修正被關掉了", ascii(typo_reply["commitString"]))
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

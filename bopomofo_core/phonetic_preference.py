@@ -1,15 +1,16 @@
 """要不要讓輸入法替你改讀音相近的字。
 
-台灣人常把 ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ、ㄣ／ㄥ 混在一起，所以打「ㄧㄣ ㄍㄞ」的時候
-輸入法會猜你要的是「應該」。實測 1200 組隨機的兩音節組合只觸發 23 次，而且幾乎
-每一次都是對的：做出、紙張、冒充、撕裂、敬老、辭呈、貶損、魚叉。
+**預設關閉。** 這個專案要的自動修正是錯別字——以經→已經、迫不急待→迫不及待、
+問提→問題，那些是等長、無歧義的精確替換，住在 autocorrect.py 與 common_typos.json，
+跟這個開關無關，永遠是開的。
 
-代價是它偶爾會替你改掉你本來就打對的字。打 ㄙˉ ㄕˉ 這種「兩個不相干的音節、
-剛好沒有對應的詞」時，它會挑一個讀音差一格而確實存在的詞（絲絲）。你打的字仍然
-在候選清單裡（師、失 就在第二、三位），但預設挑的不是它。
+這裡講的是另一回事：把 ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ、ㄣ／ㄥ 當成可能打錯，然後去猜
+你要的是讀音差一格的另一個詞。它在該猜對的時候會猜對（打 ㄧㄣ ㄍㄞ 得到「應該」），
+但它同樣會改掉你本來就打對的字：ㄙˉ ㄕˉ 這兩個音節沒有對應的詞，它就挑了讀音
+差一格而存在的「絲絲」；打「六扇門」會變成「六三們」。
 
-所以這是偏好，不是對錯。預設開啟——關掉會讓 ㄣ／ㄥ 分不清楚的人每天多按很多下，
-而打錯的那一方隨時選得回來。控制台的「狀態」分頁可以切換。
+猜錯的代價是你得回頭改一個你原本打對的字，而那比多按一次選字鍵惱人得多。所以
+預設關閉，想要的人可以在控制台「狀態」分頁打開。
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def default_config_path() -> str:
 
 
 def correction_enabled(config_path: str | None = None) -> bool:
-    """只有明確的 false 才關閉。檔案不存在、壞掉、缺欄位一律當成開啟。
+    """只有明確的 true 才開啟。檔案不存在、壞掉、缺欄位一律當成關閉。
 
     在建構時讀一次，不在打字路徑上讀——按鍵事件裡碰硬碟會卡住宿主程式的輸入執行緒。
     改了設定要重啟 PIME 才生效，控制台的切換會順便重啟。
@@ -39,10 +40,7 @@ def correction_enabled(config_path: str | None = None) -> bool:
         with open(path, "r", encoding="utf-8-sig") as handle:
             value = json.load(handle)
     except (OSError, ValueError):
-        return True
+        return False
     if not isinstance(value, dict):
-        return True
-    enabled = value.get("enabled")
-    if enabled is None:
-        return True
-    return bool(enabled)
+        return False
+    return bool(value.get("enabled"))
