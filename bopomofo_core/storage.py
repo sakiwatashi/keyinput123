@@ -21,13 +21,24 @@ def load_json_object(path: Path) -> dict[str, Any]:
         return {}
 
 
-def save_json_object(path: Path, value: dict[str, Any]) -> None:
-    """Atomically replace a JSON file so a crash cannot leave half a write."""
+def save_json_object(
+    path: Path, value: dict[str, Any], sort_keys: bool = False
+) -> None:
+    """Atomically replace a JSON file so a crash cannot leave half a write.
+
+    ``sort_keys`` is off by default because the live stores lean on insertion
+    order: PhraseStore evicts the oldest entry when it hits its cap, and
+    sorting would quietly turn that into "evict whatever sorts first". Sync
+    turns it on, where the opposite matters -- two machines that merged to the
+    same content must produce byte-identical files, or every sync shows up as a
+    change in the shared folder's git history and defeats the backup tool's
+    fingerprint check.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2)
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=sort_keys)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())

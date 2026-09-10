@@ -133,6 +133,40 @@ PIME 沒有其他輸入法模組時套用；安裝前會備份原始 PIME DLL，
 兩者都可以直接備份。寫入採原子替換；若檔案意外損壞，輸入法會把原檔改名為
 `*.corrupt-日期時間.json` 後以空資料啟動，不會因此整個失效。
 
+輪替備份：
+
+```powershell
+.\tools\backup_user_data.ps1          # 備份一次並輪替
+.\tools\backup_user_data.ps1 -List    # 列出現有備份
+```
+
+### 在兩台機器之間同步詞庫
+
+備份做的是快照與還原，還原會整份覆蓋 —— 另一台機器在快照之後學到的東西會消
+失。桌機與筆電共用詞庫要的是**合併**：
+
+```powershell
+python tools\sync_user_data.py --folder D:\OneDrive\PinnedBopomofo
+python tools\sync_user_data.py --folder D:\OneDrive\PinnedBopomofo --dry-run
+```
+
+共用資料夾放哪裡由使用者決定（OneDrive、Dropbox、git repo、隨身碟都行）。這
+支工具不上傳任何東西，只讀寫指定的那個資料夾；資料一樣只在自己手上。在每台
+機器上各跑一次就會收斂。
+
+合併是相加的：任何一邊有的詞都會保留，不會因為另一邊沒有就被當成刪除。唯一會
+改動既有值的情況，是同一個讀音在兩台機器上被記成不同的字 —— 那會依 `usage.json`
+的實際使用次數決定，並逐條列出保留了什麼、捨棄了什麼。合併同一份來源兩次的結
+果跟一次相同，所以放進排程重複執行是安全的。
+
+同步的檔案是 `phrases.json`、`pins.json`、`usage.json`、`hidden-characters.json`。
+`keyevent-trace.json` 與 `candidate-ui.json` 刻意排除：前者是可再生的診斷資料，
+後者描述的是這台機器（哪套反作弊、哪個螢幕）而不是使用者。
+
+> PIME 執行中時工具會拒絕合併。執行中的輸入法會在結束時用記憶體內容覆蓋整個
+> `phrases.json`，那時候合併的結果遲早被蓋掉，而且不會有任何錯誤訊息。請先從
+> 控制台關閉輸入法，合併完再啟動。
+
 ## 開發與驗證
 
 執行核心測試：
