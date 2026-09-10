@@ -7,6 +7,7 @@ is deliberately not named ``test_*.py`` because the normal test runner is
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -2206,6 +2207,49 @@ def main() -> None:
             "跟使用者選擇牴觸的個人詞條沒有被丟掉，下次組字它又會贏回來",
             heal_service.phrase_store.exact(heal_readings),
         )
+
+        # 「一律隱藏」的字不能從詞網格溜進組字區。
+        #
+        # 實測：把「喫」加進隱藏名單完全沒有效果。候選字過濾擋的是候選清單，而
+        # 詞網格是直接把選中的字寫進組字區的，畫面上的字根本不是從那裡來的。
+        from pinned_bopomofo.bopomofo_core.hidden_characters import (
+            shared_hidden_characters as hidden_filter,
+        )
+
+        zheli = ["ㄓㄜˋ", "ㄌㄧˇ"]   # ㄓㄜˋ ㄌㄧˇ
+        zheli_keys = "".join(keys_for_reading(r) for r in zheli)
+
+        def zheli_text(seq):
+            service = PinnedBopomofoTextService(DummyClient())
+            service.phrase_store = PhraseStore(
+                os.path.join(appdata, "hide-phrases-%d.json" % seq)
+            )
+            for key in zheli_keys:
+                press(service, key, seq)
+                seq += 1
+            return service.compositionString
+
+        visible = zheli_text(2900)
+        hidden_path = os.path.join(appdata, "PinnedBopomofo", "hidden-characters.json")
+        os.makedirs(os.path.dirname(hidden_path), exist_ok=True)
+        with open(hidden_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"hidden": [visible[-1]], "always_show": [], "minimum_frequency": 0},
+                handle,
+                ensure_ascii=False,
+            )
+        hidden_filter.reload()
+        try:
+            filtered = zheli_text(2910)
+            assert filtered != visible, (
+                "把字加進「一律隱藏」之後，詞網格照樣把它寫進組字區",
+                visible,
+                filtered,
+            )
+            assert visible[-1] not in filtered, (visible, filtered)
+        finally:
+            os.remove(hidden_path)
+            hidden_filter.reload()
 
         # 詞頻表：送出時記錄，用得夠多就排到詞庫前面。
         #

@@ -16,6 +16,9 @@ from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
 from .bopomofo_core.context_store import ContextStore
 from .bopomofo_core.feedback_store import FeedbackStore
+from .bopomofo_core.hidden_characters import (
+    shared_hidden_characters as HIDDEN_CHARACTERS,
+)
 from .bopomofo_core.keymap import is_typable_reading, load_layout, symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
@@ -1751,6 +1754,11 @@ class PinnedBopomofoTextService(TextService):
             MAX_PHRASE_LENGTH,
         )
         for span in spans:
+            # 「一律隱藏」的字不能從這裡溜進組字區。詞網格是直接把選中的字寫進
+            # 去的，繞過候選字過濾——實測把「喫」加進隱藏名單完全沒有效果，因為
+            # 擋的是候選清單，而畫面上的字根本不是從那裡來的。
+            if any(HIDDEN_CHARACTERS.is_hidden(c) for c in span.text):
+                continue
             # decode_phrase_lattice indexes the window it was given, so shift
             # back to buffer coordinates before writing.
             for segment, character in zip(
@@ -1778,6 +1786,8 @@ class PinnedBopomofoTextService(TextService):
             end = len(self.segments)
         start = end - width
         if width < 1 or len(phrase) != width or start < 0 or end > len(self.segments):
+            return
+        if any(HIDDEN_CHARACTERS.is_hidden(character) for character in phrase):
             return
         for segment, suggested in zip(self.segments[start:end], phrase):
             if segment.locked:
