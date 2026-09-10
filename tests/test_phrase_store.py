@@ -158,3 +158,31 @@ class PruneRedundantTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForgettingTests(unittest.TestCase):
+    """學過的東西必須有辦法忘掉，否則一筆錯的會永遠贏。
+
+    實測的病徵：`ㄅㄨˋ ㄧㄠˋ -> 部要` 讓「不要」永遠打成「部要」。使用者每次
+    把「部」改成「不」，那是單字，只會更新 pins.json；那筆兩字的記錄從來沒被
+    碰到，下一次組字又贏回來。使用者於是一直來回選，卻永遠碰不到病灶。
+    """
+
+    READINGS = ["ㄅㄨˋ", "ㄧㄠˋ"]
+
+    def test_forget_removes_the_entry_and_reports_what_it_said(self) -> None:
+        store = PhraseStore()
+        store.learn(self.READINGS, "部要")
+        self.assertEqual("部要", store.forget(self.READINGS))
+        self.assertEqual("", store.exact(self.READINGS))
+
+    def test_forgetting_something_unknown_is_harmless(self) -> None:
+        self.assertEqual("", PhraseStore().forget(["ㄅㄨˋ", "ㄧㄠˋ"]))
+
+    def test_forget_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "phrases.json"
+            store = PhraseStore(path)
+            store.learn(self.READINGS, "部要")
+            store.forget(self.READINGS)
+            self.assertEqual("", PhraseStore(path).exact(self.READINGS))

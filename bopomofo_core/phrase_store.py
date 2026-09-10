@@ -36,6 +36,21 @@ class PhraseStore:
             return
         save_json_object(self.path, self._entries)
 
+    def forget(self, readings: list[str]) -> str:
+        """Drop this reading span. Returns what it used to say, or "".
+
+        Learning has no way back otherwise. A wrong entry outranks the bundled
+        lexicon for its span, and correcting a single character afterwards only
+        touches pins.json -- so the entry survives every correction and reasserts
+        itself on the next composition. Measured on a real store:
+        ``ㄅㄨˋ ㄧㄠˋ -> 部要`` made 不要 come out as 部要 forever, and the user
+        re-picked 不 every single time without ever reaching the cause.
+        """
+        previous = self._entries.pop(self._key(readings), "")
+        if previous:
+            self.save()
+        return previous
+
     def learn(
         self,
         readings: list[str],
@@ -60,7 +75,7 @@ class PhraseStore:
 
         spans = [(0, len(readings))]
         for start, end in extra_spans or ():
-            if 0 <= start < end <= len(readings) and (start, end) != (0, len(readings)):
+            if 0 <= start < end <= len(readings) and (start, end) not in spans:
                 spans.append((start, end))
 
         changed = False

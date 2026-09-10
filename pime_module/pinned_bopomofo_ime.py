@@ -1311,6 +1311,7 @@ class PinnedBopomofoTextService(TextService):
             segment.text for segment in self.segments[choice.start : choice.end]
         )
         self.feedback_store.record(readings, converted, choice.text)
+        self._forget_conflicting_phrases(choice.start, choice.end, choice.text)
         if choice.width == 1:
             self.session.pins.pin(readings[0], choice.text)
         else:
@@ -1419,6 +1420,32 @@ class PinnedBopomofoTextService(TextService):
         self._apply_phrase_ranking()
         self.setShowCandidates(False)
         self._render_buffer()
+
+    def _forget_conflicting_phrases(self, start: int, end: int, text: str) -> None:
+        """把跟這次選擇牴觸的個人詞條丟掉。
+
+        使用者明確選了別的字，就等於說「蓋在這裡的那筆記錄是錯的」。不丟掉的話
+        它下一次組字又會贏回來，而使用者的修正只會落在 pins.json（單字）或另一個
+        讀音鍵上，永遠碰不到病灶——實測就是這樣一直來回選「不」和「步」。
+
+        掃過每一個涵蓋這次選擇、寬度在詞庫範圍內的跨度。最多 12x12 次字典查詢，
+        而且只在使用者親手選字時才跑。
+        """
+        for span_start in range(max(0, end - MAX_PHRASE_LENGTH), start + 1):
+            for span_end in range(
+                max(span_start + MIN_PHRASE_LENGTH, end),
+                min(len(self.segments), span_start + MAX_PHRASE_LENGTH) + 1,
+            ):
+                readings = [
+                    segment.reading
+                    for segment in self.segments[span_start:span_end]
+                ]
+                remembered = self.phrase_store.exact(readings)
+                if not remembered:
+                    continue
+                chosen = remembered[start - span_start : end - span_start]
+                if chosen != text:
+                    self.phrase_store.forget(readings)
 
     def _personal_phrase(self, readings: list[str], context: str) -> tuple[str, bool]:
         """The user's word for these readings, and whether the context backs it.

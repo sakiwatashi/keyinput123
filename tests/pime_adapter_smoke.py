@@ -2172,6 +2172,42 @@ def main() -> None:
             ["ㄒㄧㄝˇ", "ㄔㄥˊ"]
         ) == {}
 
+        # 使用者改字時，跟這次選擇牴觸的個人詞條要被丟掉。
+        #
+        # 實測的病徵：詞庫裡有 `ㄅㄨˋ ㄧㄠˋ -> 部要`，於是「不要」永遠打成
+        # 「部要」。使用者每次把「部」改成「不」，那是單字，只會更新 pins.json；
+        # 那筆兩字的記錄從來沒被碰到，下一次組字又贏回來。使用者一直來回選，卻
+        # 永遠碰不到病灶。
+        heal_service = PinnedBopomofoTextService(DummyClient())
+        heal_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "heal-phrases.json")
+        )
+        heal_readings = ["ㄅㄨˋ", "ㄧㄠˋ"]
+        heal_service.phrase_store.learn(heal_readings, "部要")
+        assert heal_service.phrase_store.exact(heal_readings) == "部要"
+
+        type_readings(heal_service, heal_readings, 2950)
+        assert len(heal_service.segments) == 2, heal_service.compositionString
+        # 使用者把第一個字改成「不」。
+        heal_service._apply_candidate_choice(CandidateChoice("不", 0, 1))
+
+        assert heal_service.phrase_store.exact(heal_readings) == "", (
+            "跟使用者選擇牴觸的個人詞條沒有被丟掉，下次組字它又會贏回來",
+            heal_service.phrase_store.exact(heal_readings),
+        )
+
+        # 跟這次選擇一致的條目不能被誤刪，否則使用者選一次字就會清掉自己的詞庫。
+        keep_service = PinnedBopomofoTextService(DummyClient())
+        keep_service.phrase_store = PhraseStore(
+            os.path.join(appdata, "keep-phrases.json")
+        )
+        keep_service.phrase_store.learn(heal_readings, "不要")
+        type_readings(keep_service, heal_readings, 2960)
+        keep_service._apply_candidate_choice(CandidateChoice("不", 0, 1))
+        assert keep_service.phrase_store.exact(heal_readings) == "不要", (
+            "跟選擇一致的條目竟然也被刪掉了"
+        )
+
         # Moving back to the end must still append, and Backspace's own gap
         # must keep working -- that path was already correct.
         tail_service = PinnedBopomofoTextService(DummyClient())
