@@ -154,3 +154,148 @@ class ExtraPhraseTests(unittest.TestCase):
     def test_a_missing_file_falls_back_to_upstream_only(self) -> None:
         plain = ReadingPhraseLexicon(extra_path=Path("no-such-extra.json"))
         self.assertEqual(0, plain.weight(["ㄓㄜˋ", "ㄗㄨㄛˋ"], "這座"))
+
+
+class WeightAndOrderAgreeTests(unittest.TestCase):
+    """candidates() 的順序必須跟 weight() 的數字一致。
+
+    這兩個答案曾經是兩份各自實作的程式碼。結果是權重改對了而順序沒跟著改：
+    「這裡」的 weight 已經贏過「這裏」，按 ↓ 卻還是「這裏」排第一。這一組
+    測試盯的不是某個詞，而是「兩邊會不會再度分家」。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def sample_keys(self, count: int) -> list[str]:
+        # 跨越整份索引取樣，而不是只看前面幾筆——降權與破音字散在各處。
+        keys = sorted(self.lexicon._entries)
+        step = max(1, len(keys) // count)
+        return keys[::step][:count]
+
+    def test_candidate_order_never_contradicts_the_weight(self) -> None:
+        checked = 0
+        for key in self.sample_keys(400):
+            readings = key.split(" ")
+            candidates = self.lexicon.candidates(readings)
+            weights = [self.lexicon.weight(readings, c) for c in candidates]
+            for earlier, later in zip(weights, weights[1:]):
+                self.assertGreaterEqual(
+                    earlier,
+                    later,
+                    f"{key} 的候選順序跟權重不一致：{list(zip(candidates, weights))}",
+                )
+            checked += len(candidates)
+        self.assertGreater(checked, 500, "取樣太少，這個測試沒有真的在看東西")
+
+    def test_a_demoted_variant_is_ordered_by_its_demoted_weight(self) -> None:
+        # 具體的一組：異體字降權之後，順序也要跟著換。
+        readings = ["ㄔˉ"]
+        candidates = self.lexicon.candidates(readings)
+        self.assertIn("吃", candidates)
+        self.assertIn("喫", candidates)
+        self.assertLess(candidates.index("吃"), candidates.index("喫"))
+        self.assertGreater(
+            self.lexicon.weight(readings, "吃"),
+            self.lexicon.weight(readings, "喫"),
+        )
+
+    def test_a_supplied_word_is_ordered_by_its_supplied_weight(self) -> None:
+        # 補進來的詞也要進到同一條排序裡，不是附在最後面。
+        readings = ["ㄓㄜˋ", "ㄗㄨㄛˋ"]
+        candidates = self.lexicon.candidates(readings)
+        self.assertIn("這座", candidates)
+        self.assertIn("蔗作", candidates)
+        self.assertLess(candidates.index("這座"), candidates.index("蔗作"))
+
+
+class RowCacheTests(unittest.TestCase):
+    """快取只准影響速度，不准影響答案。"""
+
+    def test_the_cache_returns_the_same_answer_as_a_cold_lookup(self) -> None:
+        warm = ReadingPhraseLexicon()
+        for key in ["ㄅㄨˋ", "ㄕˋ", "ㄔˉ", "ㄓㄜˋ ㄗㄨㄛˋ", "ㄨㄛˇ ㄇㄣ˙"]:
+            readings = key.split(" ")
+            cold = ReadingPhraseLexicon().candidates(readings)
+            self.assertEqual(cold, warm.candidates(readings))
+            self.assertEqual(cold, warm.candidates(readings), "第二次查就變了")
+
+    def test_the_cache_is_bounded(self) -> None:
+        # 輸入法是長時間執行的行程。無上限的快取就是慢性洩漏。
+        from bopomofo_core.reading_phrase_lexicon import ROW_CACHE_LIMIT
+
+        lexicon = ReadingPhraseLexicon()
+        for key in sorted(lexicon._entries)[: ROW_CACHE_LIMIT * 3]:
+            lexicon.candidates(key.split(" "))
+        self.assertLessEqual(len(lexicon._row_cache), ROW_CACHE_LIMIT)
+        self.assertGreater(len(lexicon._row_cache), 0, "根本沒在快取")
+
+
+class ToneSandhiTests(unittest.TestCase):
+    """「一」「不」的兩種唸法都要查得到詞。
+
+    「幫我一個忙」打出來是「幫我一各忙」。詞庫把「一個」只收在本調 ㄧˉ ㄍㄜˋ
+    底下，而這個詞唸出來是 yí ge——照著唸打 ㄧˊ ㄍㄜˋ，兩字詞一個都查不到，
+    只能逐字拼，「各」就有機會冒出來。
+
+    反方向缺得更嚴重：「不是」「不要」在語料裡只收了變調的 ㄅㄨˊ，而本調
+    ㄅㄨˋ ㄕˋ、ㄅㄨˋ ㄧㄠˋ 查下去一個詞都沒有——本調正是學校教的打法。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_spoken_tone_finds_the_word(self) -> None:
+        # 一 在四聲前唸 ㄧˊ
+        self.assertIn("一個", self.lexicon.candidates(["ㄧˊ", "ㄍㄜˋ"]))
+        self.assertIn(
+            "一個人", self.lexicon.candidates(["ㄧˊ", "ㄍㄜˋ", "ㄖㄣˊ"])
+        )
+        # 一 在一二三聲前唸 ㄧˋ
+        self.assertIn("一一", self.lexicon.candidates(["ㄧˋ", "ㄧˉ"]))
+        # 不 只在四聲前變，語料本來就收了，這裡確認沒被弄壞
+        self.assertIn("不是", self.lexicon.candidates(["ㄅㄨˊ", "ㄕˋ"]))
+
+    def test_the_base_tone_finds_the_word(self) -> None:
+        # 學校教的是本調，很多人就是這樣打。這幾個在語料裡本調底下是空的。
+        self.assertIn("不是", self.lexicon.candidates(["ㄅㄨˋ", "ㄕˋ"]))
+        self.assertIn("不要", self.lexicon.candidates(["ㄅㄨˋ", "ㄧㄠˋ"]))
+        self.assertIn("一個", self.lexicon.candidates(["ㄧˉ", "ㄍㄜˋ"]))
+        self.assertIn("一定", self.lexicon.candidates(["ㄧˉ", "ㄉㄧㄥˋ"]))
+
+    def test_a_re_spelled_word_does_not_outrank_the_word_that_owns_the_sound(
+        self,
+    ) -> None:
+        """「不對」唸 bú duì，本調寫法撞到「部隊」——而部隊沒有變調，那就是它
+        唯一的唸法。補進來的目的是讓詞打得出來，不是讓它排第一。"""
+        self.assertEqual("部隊", self.lexicon.candidates(["ㄅㄨˋ", "ㄉㄨㄟˋ"])[0])
+        self.assertIn("不對", self.lexicon.candidates(["ㄅㄨˋ", "ㄉㄨㄟˋ"]))
+        self.assertEqual("步調", self.lexicon.candidates(["ㄅㄨˋ", "ㄉㄧㄠˋ"])[0])
+        self.assertIn("不掉", self.lexicon.candidates(["ㄅㄨˋ", "ㄉㄧㄠˋ"]))
+
+    def test_the_ordinal_one_is_left_alone(self) -> None:
+        # 第一名唸 dì-yī-míng，不是 dì-yì-míng。序數的一不變調，把它當成會變調
+        # 的，產生出來的就是沒有人會這樣唸的讀音。
+        for phrase in ("第一名", "第一次", "第十一屆"):
+            for key, words in self._added().items():
+                self.assertNotIn(
+                    phrase, words, f"{phrase} 不該有變調唸法（{key}）"
+                )
+
+    def test_the_month_reading_does_not_displace_the_real_sandhi_word(self) -> None:
+        # 一月唸 yī-yuè；ㄧˊ ㄩㄝˋ 是「一躍」的唸法，不能被一月佔走。
+        self.assertEqual("一躍", self.lexicon.candidates(["ㄧˊ", "ㄩㄝˋ"])[0])
+
+    def _added(self) -> dict:
+        import json
+        from bopomofo_core.reading_phrase_lexicon import DEFAULT_SANDHI
+
+        return json.loads(DEFAULT_SANDHI.read_text(encoding="utf-8"))["entries"]
+
+    def test_a_missing_file_falls_back_to_the_base_tone_only(self) -> None:
+        plain = ReadingPhraseLexicon(sandhi_path=Path("no-such-sandhi.json"))
+        self.assertNotIn("一個", plain.candidates(["ㄧˊ", "ㄍㄜˋ"]))
+        self.assertEqual([], plain.candidates(["ㄅㄨˋ", "ㄕˋ"]))
+        self.assertIn("一個", plain.candidates(["ㄧˉ", "ㄍㄜˋ"]))
