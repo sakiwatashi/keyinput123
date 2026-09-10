@@ -15,7 +15,7 @@ from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
 from .bopomofo_core.feedback_store import FeedbackStore
-from .bopomofo_core.keymap import load_layout, symbol_for_event
+from .bopomofo_core.keymap import is_typable_reading, load_layout, symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
 from .bopomofo_core.usage_store import UsageStore
@@ -959,6 +959,17 @@ class PinnedBopomofoTextService(TextService):
         """
         if start < 0 or end > len(self.segments) or end - start < 2:
             return []
+        # Every caller ends up asking libchewing about these readings, and a
+        # literal ASCII segment has none it can answer for. _apply_phrase_ranking
+        # already splits the buffer at those, but _build_candidate_choices picks
+        # its own spans -- pressing Down with the caret near a 我們=好 crossed
+        # one and raised straight out of onKeyDown, losing the whole composition.
+        # Guarding the shared entry point covers both, and any span chosen later.
+        if not all(
+            is_typable_reading(segment.reading)
+            for segment in self.segments[start:end]
+        ):
+            return []
         readings = [segment.reading for segment in self.segments[start:end]]
         personal = self.phrase_store.exact(readings)
         frequent = self.session.validated_frequent_phrase_candidates(
@@ -1399,21 +1410,53 @@ class PinnedBopomofoTextService(TextService):
         self.setShowCandidates(False)
         self._render_buffer()
 
+    def _typable_runs(self) -> list[tuple[int, int]]:
+        """Maximal spans of segments whose readings are real Bopomofo.
+
+        A literal ASCII segment inserted mid-composition -- ``我們=好`` -- has
+        no reading libchewing can be asked about, and handing it one raised
+        straight out of onKeyDown, taking the whole uncommitted composition
+        with it. It is also a genuine phrase boundary: 我們=好 is not a word.
+
+        Ranking each run on its own therefore fixes the crash and keeps the
+        correction the user actually wants -- 我們 on the left still gets it,
+        instead of the whole buffer silently losing phrase ranking as soon as
+        one symbol appears anywhere in it.
+        """
+        runs: list[tuple[int, int]] = []
+        start: int | None = None
+        for index, segment in enumerate(self.segments):
+            if is_typable_reading(segment.reading):
+                if start is None:
+                    start = index
+            elif start is not None:
+                runs.append((start, index))
+                start = None
+        if start is not None:
+            runs.append((start, len(self.segments)))
+        return runs
+
     def _apply_phrase_ranking(self) -> None:
         """Decode every unlocked span, then apply whole-sentence correction."""
         if len(self.segments) < 2:
             return
-        self._apply_phrase_lattice()
-        whole_options = self._ranked_phrase_options(0, len(self.segments))
-        whole_default = whole_options[0] if whole_options else ""
-        if whole_default:
-            self._apply_ranked_phrase(len(self.segments), whole_default)
+        for start, end in self._typable_runs():
+            if end - start < 2:
+                continue
+            self._apply_phrase_lattice(start, end)
+            options = self._ranked_phrase_options(start, end)
+            default = options[0] if options else ""
+            if default:
+                self._apply_ranked_phrase(end - start, default, end=end)
 
-    def _apply_phrase_lattice(self) -> None:
+    def _apply_phrase_lattice(self, start: int = 0, end: int | None = None) -> None:
         """Compose one sentence from multiple exact-reading common words."""
-        readings = [segment.reading for segment in self.segments]
-        current_text = "".join(segment.text for segment in self.segments)
-        protected = [segment.locked for segment in self.segments]
+        if end is None:
+            end = len(self.segments)
+        window = self.segments[start:end]
+        readings = [segment.reading for segment in window]
+        current_text = "".join(segment.text for segment in window)
+        protected = [segment.locked for segment in window]
         spans = decode_phrase_lattice(
             readings,
             current_text,
@@ -1424,8 +1467,10 @@ class PinnedBopomofoTextService(TextService):
             MAX_PHRASE_LENGTH,
         )
         for span in spans:
+            # decode_phrase_lattice indexes the window it was given, so shift
+            # back to buffer coordinates before writing.
             for segment, character in zip(
-                self.segments[span.start : span.end], span.text
+                self.segments[start + span.start : start + span.end], span.text
             ):
                 if segment.locked:
                     continue
@@ -1437,12 +1482,20 @@ class PinnedBopomofoTextService(TextService):
                     segment.locked = True
 
     def _apply_ranked_phrase(
-        self, width: int, phrase: str, lock: bool = False
+        self, width: int, phrase: str, lock: bool = False, end: int | None = None
     ) -> None:
-        """Move one phrase to the front without replacing locked segments."""
-        if width < 1 or len(phrase) != width or width > len(self.segments):
+        """Move one phrase to the front without replacing locked segments.
+
+        ``end`` defaults to the end of the buffer, which is where every caller
+        wanted it until literal ASCII started splitting the buffer into runs
+        that do not reach it.
+        """
+        if end is None:
+            end = len(self.segments)
+        start = end - width
+        if width < 1 or len(phrase) != width or start < 0 or end > len(self.segments):
             return
-        for segment, suggested in zip(self.segments[-width:], phrase):
+        for segment, suggested in zip(self.segments[start:end], phrase):
             if segment.locked:
                 continue
             segment.candidates = list(

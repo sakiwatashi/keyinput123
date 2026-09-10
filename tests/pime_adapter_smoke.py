@@ -2048,6 +2048,47 @@ def main() -> None:
             # 插進去之後還要能繼續編輯，這是選「插進組字區」而不是「送出」的重點。
             assert oem_service.isComposing(), (label, "插入符號後組字被結束了")
 
+            # 繼續打字。第一版測試在這裡就停手，於是漏掉真正會出事的那一步：
+            # 符號被存成 segment 的 reading，而詞彙排序會把每個 reading 送去
+            # libchewing 問候選，keys_for_reading 對 '=' 丟出例外，例外從
+            # onKeyDown 一路拋出去，PIME 把整個組字終止——使用者看到的是卡頓
+            # 一下，然後前面沒送出的字全部消失。
+            oem_sequence = type_readings(oem_service, ["ㄉㄚˋ"], oem_sequence)
+            assert oem_service.isComposing(), (
+                label,
+                "符號後面繼續打字時組字被終止了，未送出的文字會全部消失",
+            )
+            # 游標停在剛插入的符號之後，所以下一個字接在符號右邊而不是跑到最後：
+            # 我們|好 打 ' 得到 我們'|好，再打「大」就是 我們'大好。
+            assert oem_service.compositionString == "我們%s大好" % character, (
+                label,
+                oem_service.compositionString,
+            )
+
+            # 符號是硬邊界，但它左邊那段仍然要有整句排序。整個緩衝區因為出現
+            # 一個符號就失去詞彙修正，是修法太粗暴的徵兆。
+            assert len(oem_service.segments) == 5, (
+                label,
+                len(oem_service.segments),
+            )
+
+            # 按 ↓ 開候選。這條路自己挑區間，不走 _apply_phrase_ranking 的邊界
+            # 切分，所以守門必須放在兩者共用的入口。
+            #
+            # 游標要先移到最尾端。_candidate_phrase_spans 只有在游標位於最後
+            # 一格時才產生「由後往前」的長區間（0,5）(2,5)…，那些才會跨過中間
+            # 的符號；游標停在中間時區間從游標右邊開始，寬度只有 1，根本不會
+            # 呼叫到 _ranked_phrase_options——第一版測試就是停在那裡，於是把
+            # 守門拿掉也照樣通過。
+            special_key(oem_service, 0x27, oem_sequence)  # VK_RIGHT -> 移到尾端
+            oem_sequence += 1
+            special_key(oem_service, 0x28, oem_sequence)  # VK_DOWN
+            oem_sequence += 1
+            assert oem_service.isComposing(), (
+                label,
+                "在含有符號的組字區按 ↓ 讓組字被終止了",
+            )
+
         # 沒有在組字時必須維持原樣交還給應用程式。那時候字元本來就會落在正確的
         # 位置，搶下來只會平白改掉行為——而且會擋住應用程式自己對這些鍵的處理。
         idle_service = PinnedBopomofoTextService(DummyClient())

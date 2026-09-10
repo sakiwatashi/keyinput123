@@ -191,6 +191,22 @@ def symbol_for_event(key_code: int, char_code: int = 0) -> str | None:
     return None
 
 
+def is_typable_reading(reading: str) -> bool:
+    """Whether ``keys_for_reading`` can translate this whole reading.
+
+    The buffer holds one segment per character, and a segment's reading is
+    normally Bopomofo. Literal ASCII inserted mid-composition (``=``, ``'``…)
+    is not: feeding it to keys_for_reading raises, and that exception used to
+    escape onKeyDown and take the entire uncommitted composition with it.
+
+    Callers use this to treat such a segment as a hard boundary rather than to
+    make keys_for_reading lenient. Skipping an untranslatable symbol there
+    would send libchewing a shorter key sequence than the reading it was asked
+    about, and it would answer confidently about a different reading.
+    """
+    return bool(reading) and all(symbol in SYMBOL_TO_KEY for symbol in reading)
+
+
 def keys_for_reading(reading: str) -> str:
     """Translate Bopomofo symbols to the keystrokes libchewing expects.
 
