@@ -73,10 +73,40 @@ jobs:
       - name: Build PIME overlay
         shell: powershell
         run: .\build_pime_overlay.ps1
+  keys:
+    # 真正按下按鍵、看輸出什麼的測試。音節邊界、按住不放、上下文學習、
+    # 詞頻表、全讀音稽核——這些只有這一份在守，而它們需要 32 位元 Python
+    # 才載得動 libchewing。之前因此只在本機跑：改完轉接層忘了本機跑，CI 會
+    # 全綠而輸入法是壞的。setup-python 給得了 x86，PIME 那兩個檔抓下來就好。
+    #
+    # 路徑一律用正斜線。反斜線寫進 YAML 會在中途被當成跳脫字元吃掉（\t 變成 Tab、\f 變成換頁），而那種壞法在檔案裡看不出來。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: "x86"
+      - name: Fetch the pinned PIME runtime files
+        shell: powershell
+        run: ./tools/fetch_pime_runtime.ps1 -Destination pime-ci
+      - name: Build PIME overlay
+        shell: powershell
+        run: ./build_pime_overlay.ps1
+      - name: Test key behaviour end to end
+        shell: powershell
+        env:
+          PIME_ROOT: ${{ github.workspace }}/pime-ci
+        run: python tests/pime_adapter_smoke.py
+      - name: Audit every reading in the index
+        shell: powershell
+        env:
+          PIME_ROOT: ${{ github.workspace }}/pime-ci
+        run: python tests/pime_all_readings_audit.py
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: test
+    needs: [test, keys]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5

@@ -53,6 +53,11 @@ $readJsonObject = {
             # 所以兩個輔助工具必須先變成本地變數，否則按下按鈕時會是 $null。
             $readJson = $readJsonObject
             $saveJson = $saveJsonObject
+            # $Context 是 Build 的參數，不是這個函式的本地變數，所以 GetNewClosure
+            # 一樣抓不到它。少了這一行，「儲存並重啟 PIME」與「清理重複片段」按下去
+            # 時 $Context 是 $null，& $Context.RestartPime 就會炸——而檔案其實已經
+            # 存好了，使用者看到的卻是「儲存失敗」，PIME 也沒有重啟。
+            $ctx = $Context
 
             $page = New-Object System.Windows.Forms.TabPage
             $page.Text = $title
@@ -164,7 +169,12 @@ $readJsonObject = {
             $backupTool = if ($Context.ModuleRoot) {
                 Join-Path $Context.ModuleRoot (Join-Path "tools" "backup_user_data.ps1")
             } else { $null }
-            $backupRoot = Join-Path $env:LOCALAPPDATA "PinnedBopomofoackups"
+            # 備份目錄用兩層 Join-Path 拼，不寫成一個含反斜線的字串。這一行
+            # 曾經是 PinnedBopomofo 加一個退格控制字元再加 ackups——寫檔時
+            # 那個反斜線被吃成了 0x08。Windows 不允許檔名含控制字元，於是
+            # 「開啟備份資料夾」按下去什麼也沒發生：事件處理程序裡的錯誤不會
+            # 進 $Error、不會彈對話框，連按鈕煙霧測試都看不到。
+            $backupRoot = Join-Path $env:LOCALAPPDATA (Join-Path "PinnedBopomofo" "backups")
 
             $backupButton.Add_Click({
                 if (-not $backupTool -or -not (Test-Path -LiteralPath $backupTool)) {
@@ -279,7 +289,7 @@ $readJsonObject = {
                     }
                     $done = & $python $tool --apply 2>$null | ConvertFrom-Json
                     & $load
-                    $result = & $Context.RestartPime $Context.LauncherPath
+                    $result = & $ctx.RestartPime $ctx.LauncherPath
                     $status.Text = "已清理 $($done.removable) 筆，剩 $($done.after) 筆。$($result.Message)"
                 }
                 catch {
@@ -304,7 +314,7 @@ $readJsonObject = {
 
                     # 執行中的輸入法把整份詞庫存在記憶體裡，任何一次學習都會用
                     # 記憶體內容覆蓋整個檔案。不重啟 PIME，這次編輯遲早被蓋掉。
-                    $result = & $Context.RestartPime $Context.LauncherPath
+                    $result = & $ctx.RestartPime $ctx.LauncherPath
                     $status.Text = "已儲存 $($payload.Count) 筆。$($result.Message)"
                 }
                 catch {

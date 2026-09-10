@@ -88,7 +88,12 @@ try {
         $found = @()
         foreach ($child in $control.Controls) {
             if ($child -is [System.Windows.Forms.Button]) { $found += $child }
-            if ($child.Controls.Count -gt 0) { $found += Get-Buttons $child }
+            # TabControl 的 Controls 本身就是 TabPages。兩邊都走會讓分頁裡的
+            # 每顆按鈕重複出現；個人詞庫那一頁因此被數了四遍，$clicked 的門檻
+            # 看起來過得很輕鬆，其實一顆都沒真的按到。
+            if ($child -isnot [System.Windows.Forms.TabControl] -and $child.Controls.Count -gt 0) {
+                $found += Get-Buttons $child
+            }
             # 分頁裡的分頁（個人詞庫有兩頁）也要走進去。
             if ($child -is [System.Windows.Forms.TabControl]) {
                 foreach ($page in $child.TabPages) { $found += Get-Buttons $page }
@@ -96,20 +101,54 @@ try {
         }
         return $found
     }
+    function Get-TextSnapshot {
+        # 控制項裡所有看得到的字。用來判斷處理程序有沒有留下話。
+        param($control)
+        $parts = @()
+        foreach ($child in $control.Controls) {
+            if ($child -is [System.Windows.Forms.Label] -or
+                $child -is [System.Windows.Forms.TextBox]) { $parts += [string]$child.Text }
+            if ($child -isnot [System.Windows.Forms.TabControl] -and $child.Controls.Count -gt 0) {
+                $parts += Get-TextSnapshot $child
+            }
+            if ($child -is [System.Windows.Forms.TabControl]) {
+                foreach ($page in $child.TabPages) { $parts += Get-TextSnapshot $page }
+            }
+        }
+        return ($parts -join "|")
+    }
 
-    # 先確認 PerformClick 在這個環境下真的會叫到處理程序。
+    # 直接觸發 Click，不走 PerformClick。
     #
-    # 這一段不是多餘的：本測試原本把每個分頁掛到一個沒有 Show 過的 Form 底下，
-    # 而 Button.PerformClick 會先問 CanSelect，CanSelect 往上走訪父控制項時碰到
-    # Visible=false 的 Form 就回傳 false，PerformClick 於是靜靜地什麼也不做。
-    # 測試照樣「通過」，但一個處理程序都沒執行過。空轉的測試比沒有測試更糟，
-    # 所以現在每次都先驗一次自己。
+    # PerformClick 會先問 CanSelect，而 CanSelect 沿著父鏈碰到沒有 Show 過的容器
+    # 就是 false，於是它靜靜地什麼也不做。實測：41 顆按鈕裡有 26 顆——整個個人
+    # 詞庫分頁——從來沒有被按過，而測試一路綠燈。20-lexicon.ps1 兩個真的壞掉的
+    # 按鈕就是這樣活下來的。
+    #
+    # OnClick 是 protected，用反射叫它。這不是使用者的路徑，但這支測試要問的是
+    # 「處理程序跑起來會不會炸」，不是「這顆按鈕在畫面上按不按得到」。
+    $onClick = [System.Windows.Forms.Control].GetMethod(
+        "OnClick",
+        [System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+    if (-not $onClick) {
+        $failures.Add("找不到 Control.OnClick，這支測試沒有辦法觸發任何按鈕")
+    }
+    function Invoke-Click {
+        param($Button)
+        $onClick.Invoke($Button, @([EventArgs]::Empty))
+    }
+
+    # 先證明這個機制真的會叫到處理程序，而且是在容器裡的按鈕上——舊版的探針用
+    # 一顆沒有父容器的孤兒按鈕，而孤兒按鈕的 CanSelect 剛好是 true，所以它證明
+    # 不了巢狀按鈕按得到。
     $probeFired = $false
+    $probePanel = New-Object System.Windows.Forms.Panel
     $probe = New-Object System.Windows.Forms.Button
+    [void]$probePanel.Controls.Add($probe)
     $probe.Add_Click({ $script:probeFired = $true })
-    $probe.PerformClick()
+    Invoke-Click $probe
     if (-not $probeFired) {
-        $failures.Add("PerformClick 沒有觸發處理程序，這支測試等於空轉（請檢查控制項是否掛在未顯示的 Form 底下）")
+        $failures.Add("觸發機制沒有叫到處理程序，這支測試等於空轉")
     }
 
     # 攔截 Start-Process，不要讓測試在使用者桌面上開視窗。
@@ -152,12 +191,31 @@ try {
                 # try/catch 包起來，結果重現使用者的錯誤時仍然通過。改成比對
                 # $Error 的變化。
                 $before = $Error.Count
+                $launchedBefore = $script:launched.Count
+                $textBefore = Get-TextSnapshot $control
                 # 空狀態下按。使用者第一次打開面板看到的就是這個狀態，
                 # 而那正是回報發生的時機。
                 $script:dialogSeen = $null
                 $watchdog.Start()
-                try { $button.PerformClick() } finally { $watchdog.Stop() }
+                try { Invoke-Click $button } finally { $watchdog.Stop() }
                 $clicked++
+                # 事件處理程序裡的例外，$Error 抓不到（實測：非終止錯誤、明確
+                # throw、非法路徑，三種都不會讓 $Error 增加）。所以真正在守的是
+                # 「該做完的事有沒有做完」：開啟資料夾的終點是叫起 explorer。
+                if ($button.Text -match "開啟" -and $button.Text -match "資料夾") {
+                    if ($script:launched.Count -eq $launchedBefore -and
+                            (Get-TextSnapshot $control) -eq $textBefore) {
+                        # 既沒開資料夾也沒留下任何話，就是半路死了。沒設共用資料夾
+                        # 時同步那顆會寫「還沒選共用資料夾」再返回，那是正常的。
+                        $failures.Add("$label -> 既沒開啟資料夾也沒留下任何訊息，處理程序中途就死了")
+                    }
+                    elseif ($script:launched.Count -gt $launchedBefore) {
+                        $opened = $script:launched[$script:launched.Count - 1]
+                        if ($opened -match ("[" + [char]0 + "-" + [char]31 + "]")) {
+                            $failures.Add("$label -> 開啟的路徑含控制字元，explorer 打不開：$opened")
+                        }
+                    }
+                }
                 if ($Error.Count -gt $before) {
                     $failures.Add("$label -> $($Error[0].Exception.Message)")
                 }
@@ -220,4 +278,4 @@ if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Output "FAIL: $failure" }
     throw "control_panel_buttons_smoke 有 $($failures.Count) 項失敗。"
 }
-Write-Output "PASS: 控制台每個按鈕在空狀態下按下去都不會丟例外"
+Write-Output "PASS: 控制台每顆按鈕的處理程序都跑得完，開啟資料夾的那幾顆確實開了"

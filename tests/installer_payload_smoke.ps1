@@ -50,12 +50,12 @@ if ($missing.Count -gt 0) {
 
 # A stray control character inside a path literal is invisible in an editor and
 # in a diff, but it breaks the path at run time. This shipped once: an escaping
-# slip while editing install.ps1 turned "WindowsPowerShell1.0" into a vertical
+# slip while editing install.ps1 turned "WindowsPowerShell" 加上一個垂直定位控制字元再加 "1.0" into a vertical
 # tab, so the Start-menu shortcut refused the target and the whole install
 # aborted with a bare exit code 1. Nothing else here reaches shortcut creation.
 #
 # 掃描範圍不只 installer\：build 腳本與 tools\ 也會寫死路徑，而且已經中過招
-# ——"toolsackup_user_data.ps1" 的  被吃成退格字元，變成 toolsackup_...，
+# ——"tools" 加上一個退格控制字元再加 "ackup_user_data.ps1" 的 反斜線被吃成退格字元，變成 toolsackup_...，
 # 建置直接失敗。凡是有反斜線路徑字面值的腳本都要納入。
 $corrupt = @()
 $scanTargets = @(Get-ChildItem -LiteralPath $installerRoot -Filter *.ps1 -File)
@@ -66,6 +66,19 @@ foreach ($extra in @("build_pime_overlay.ps1", "build_release.ps1", "install.ps1
 $toolsRoot = Join-Path (Split-Path -Parent $installerRoot) "tools"
 if (Test-Path -LiteralPath $toolsRoot) {
     $scanTargets += Get-ChildItem -LiteralPath $toolsRoot -Filter *.ps1 -File
+}
+# 控制台也要掃。20-lexicon.ps1 的備份目錄曾經是 PinnedBopomofo 加一個退格控制
+# 字元再加 ackups，於是「開啟備份資料夾」按下去什麼也沒發生——Windows 不允許
+# 檔名含控制字元，而事件處理程序裡的錯誤不會進 $Error、不會彈對話框，按鈕煙霧
+# 測試也看不到。那個檔活在這份掃描範圍之外，所以沒有人發現。
+$panelRoot = Join-Path (Split-Path -Parent $installerRoot) "control_panel"
+if (Test-Path -LiteralPath $panelRoot) {
+    $scanTargets += Get-ChildItem -LiteralPath $panelRoot -Filter *.ps1 -File -Recurse
+}
+# workflow 也是：YAML 裡的反斜線同樣會被吃掉，而壞掉的 run: 指令要推上去才知道。
+$workflowRoot = Join-Path (Split-Path -Parent $installerRoot) ".github"
+if (Test-Path -LiteralPath $workflowRoot) {
+    $scanTargets += Get-ChildItem -LiteralPath $workflowRoot -Filter *.yml -File -Recurse
 }
 foreach ($script in $scanTargets) {
     $text = [IO.File]::ReadAllText($script.FullName)

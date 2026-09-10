@@ -1,15 +1,19 @@
-﻿# 一次跑完所有測試，包括 CI 跑不到的那些。
+﻿# 一次跑完所有測試。
 #
-# CI 只跑 64 位元 Python 的單元測試和 PowerShell 煙霧測試。真正驗到按鍵行為的
-# tests\pime_adapter_smoke.py 和 tests\pime_all_readings_audit.py 需要 PIME 內建
-# 的 32 位元 Python 才能載入 libchewing，GitHub runner 上沒有那個東西。
+# CI 分成兩個 job：test 跑 64 位元 Python 的單元測試和 PowerShell 煙霧測試，
+# keys 跑真正按下按鍵的那兩支（tests\pime_adapter_smoke.py 與
+# tests\pime_all_readings_audit.py）。後者需要 32 位元 Python 才載得動
+# libchewing，CI 用 setup-python 的 x86 加上 tools\fetch_pime_runtime.ps1
+# 抓下來的 PIME 檔案；本機則直接用 PIME 內建的那一份。
 #
-# 後果是：音節邊界、按住不放、上下文學習、詞頻表——這次做的每一項回歸測試都只在
-# 本機守著。改完 pinned_bopomofo_ime.py 之後忘了跑，CI 會全綠而輸入法是壞的。
-# 這支腳本存在就是為了讓「全部跑一次」只有一行指令。
+# 本機仍然要跑：CI 要推上去才會動，而音節邊界、按住不放、上下文學習、詞頻表
+# 這些只有那兩支在守，改完 pinned_bopomofo_ime.py 當場就該知道有沒有壞。
 #
 #     .\tools\run_all_tests.ps1
-#     .\tools\run_all_tests.ps1 -SkipSlow      跳過全讀音稽核（它要跑好幾分鐘）
+#     .\tools\run_all_tests.ps1 -SkipSlow      跳過全讀音稽核
+#
+# -SkipSlow 是歷史包袱。稽核現在跑 0.8 秒，真正花時間的是按鍵測試（5.7 秒），
+# 而那一支不能跳。旗標留著只是為了不讓既有的呼叫壞掉。
 [CmdletBinding()]
 param(
     [switch]$SkipSlow
@@ -64,7 +68,7 @@ else {
         & $pythonPath (Join-Path $projectRoot "tests\pime_adapter_smoke.py")
     }
     if ($SkipSlow) {
-        Write-Host "  pime_all_readings_audit.py                     跳過（-SkipSlow）"
+        Write-Host "  pime_all_readings_audit.py                     跳過（-SkipSlow，其實只要 0.8 秒）"
     }
     else {
         Invoke-Step "pime_all_readings_audit.py" {
