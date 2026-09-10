@@ -363,3 +363,42 @@ class TaiwanPreferredTests(unittest.TestCase):
     def test_a_missing_file_falls_back_to_the_corpus_order(self) -> None:
         plain = ReadingPhraseLexicon(taiwan_path=Path("no-such-taiwan.json"))
         self.assertEqual("界面", plain.candidates(["ㄐㄧㄝˋ", "ㄇㄧㄢˋ"], 1)[0])
+
+
+class MissingVocabularyTests(unittest.TestCase):
+    """詞庫整個沒收的常用詞。
+
+    「玄幻」打出來是「玄換」，不是排序問題——ㄒㄩㄢˊ ㄏㄨㄢˋ 這個讀音底下
+    一個候選都沒有，只能逐字拼，而「換」（33491）本來就壓過「幻」（1767）。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_word_can_be_typed(self) -> None:
+        for readings, expected in (
+            (["ㄒㄩㄢˊ", "ㄏㄨㄢˋ"], "玄幻"),
+            (["ㄒㄧㄡˉ", "ㄒㄧㄢˉ"], "修仙"),
+            (["ㄈㄨˊ", "ㄎㄨㄥˉ"], "浮空"),
+            (["ㄧㄤˇ", "ㄊㄤˇ"], "仰躺"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 打不出「{expected}」",
+            )
+
+    def test_nothing_was_displaced(self) -> None:
+        # 這幾個讀音鍵原本一個候選都沒有，所以補進去只能是增加。這一條盯的是
+        # 「別把補詞變成蓋掉別人」——往清單裡加一個已經有主人的讀音，這裡會紅。
+        plain = ReadingPhraseLexicon(extra_path=Path("no-such-extra.json"))
+        for readings in (
+            ["ㄒㄩㄢˊ", "ㄏㄨㄢˋ"],
+            ["ㄒㄧㄡˉ", "ㄒㄧㄢˉ"],
+            ["ㄈㄨˊ", "ㄎㄨㄥˉ"],
+            ["ㄧㄤˇ", "ㄊㄤˇ"],
+        ):
+            self.assertEqual(
+                [], plain.candidates(readings), f"{' '.join(readings)} 原本就有詞"
+            )

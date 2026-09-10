@@ -53,6 +53,21 @@ CLASSIFIERS = {
 # 方位與樣態：只有「這／那／哪」能接。沒有「每裡」「每些」。
 POSITIONAL = {"邊": "ㄅㄧㄢ", "裡": "ㄌㄧˇ", "些": "ㄒㄧㄝ", "麼": "ㄇㄜ˙"}
 
+# 詞庫整個沒收的常用詞。跟上面的格位不同，這些沒有規律可循，是一個一個發現的
+# ——tools\missing_words.py 把使用者實際打出來的詞跟詞庫對一遍，列出查不到的。
+#
+# 只收通用詞。同一份清單裡也有小說名、人名、專案名，那些是使用者的閱讀與工作
+# 紀錄，不該進到一個公開的資料檔裡。判準是「換一個人用這個輸入法也會打到嗎」。
+#
+# 這幾個的讀音鍵在詞庫裡是完全空的（一個候選都沒有），所以補進去純粹是增加，
+# 不會把任何既有的詞擠下去。
+VOCABULARY = {
+    ("玄", "幻"): ("ㄒㄩㄢˊ", "ㄏㄨㄢˋ"),
+    ("修", "仙"): ("ㄒㄧㄡ", "ㄒㄧㄢ"),
+    ("浮", "空"): ("ㄈㄨˊ", "ㄎㄨㄥ"),
+    ("仰", "躺"): ("ㄧㄤˇ", "ㄊㄤˇ"),
+}
+
 # 「每樣」成立，其餘方位詞不接「每」。單獨列出來比在表裡開例外清楚。
 EXTRA_PAIRS = {("每", "樣"): ("ㄇㄟˇ", "ㄧㄤˋ")}
 
@@ -74,6 +89,7 @@ def candidate_pairs() -> dict[tuple[str, str], tuple[str, str]]:
         for tail, tail_reading in POSITIONAL.items():
             pairs[(head, tail)] = (head_reading, tail_reading)
     pairs.update(EXTRA_PAIRS)
+    pairs.update(VOCABULARY)
     for pair in EXCLUDED:
         pairs.pop(pair, None)
     return pairs
@@ -100,7 +116,7 @@ def main() -> int:
 
     payload = {
         "version": 1,
-        "note": "上游詞庫缺席的能產組合。指示詞 × 量詞／方位詞。",
+        "note": "上游詞庫缺席的組合：指示詞 × 量詞／方位詞，加上整個沒收的常用詞。",
         "weight": EXTRA_WEIGHT,
         "entries": added,
     }
