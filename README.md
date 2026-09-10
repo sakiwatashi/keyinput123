@@ -82,7 +82,7 @@ Git Bash 使用者可把最後一行改為 `./install.sh`。
 一般使用者只需要執行發佈資料夾中的：
 
 ```text
-Smart-Priority-Bopomofo-Setup-0.7.1.exe
+Smart-Priority-Bopomofo-Setup-0.8.0.exe
 ```
 
 從 GitHub clone 原始碼後，可在 PowerShell 執行一鍵安裝：
@@ -243,7 +243,19 @@ python -m unittest discover -s tests -v
 .\build_pime_overlay.ps1
 ```
 
-已安裝 PIME 時，再執行實際鍵盤事件與全讀音稽核：
+一次跑完所有測試（包含 CI 跑不到的那些）：
+
+```powershell
+.	oolsun_all_tests.ps1
+.	oolsun_all_tests.ps1 -SkipSlow    # 跳過全讀音稽核
+```
+
+CI 只跑 64 位元的單元測試與 PowerShell 煙霧測試。真正驗到按鍵行為的兩支需要 PIME
+內建的 32 位元 Python 才能載入 libchewing，GitHub runner 上沒有 —— 音節邊界、按住
+不放、上下文學習、詞頻表的回歸測試**都只在本機守著**，改完 `pinned_bopomofo_ime.py`
+一定要在本機跑過。
+
+已安裝 PIME 時，也可以個別執行實際鍵盤事件與全讀音稽核：
 
 ```powershell
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_adapter_smoke.py

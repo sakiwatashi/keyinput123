@@ -12,11 +12,24 @@ import itertools
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIME_ROOT = Path(os.environ.get("PIME_ROOT", r"C:\Program Files (x86)\PIME"))
+
+# 隔離使用者資料，在載入任何模組之前。
+#
+# 這支稽核驗的是**出廠**排序，但候選字過濾、釘選、個人詞庫都住在 %APPDATA%，
+# 而 shared_hidden_characters 是 import 時就建立的行程層級物件。跑在開發者自己
+# 的機器上時，它讀到的是那個人的設定：實測一台字頻門檻設 20、有 265 筆釘選的
+# 機器上跑出 50 個錯誤，而同一份程式碼在乾淨設定下是 0 個。
+#
+# 那 50 個錯誤看起來像程式壞了，其實是「這個人把輸入法調成他要的樣子」。稽核
+# 因此形同永遠紅燈，久了就沒有人看——它不在 CI 裡，所以也沒有別的地方會發現。
+if not os.environ.get("PINNED_BOPOMOFO_AUDIT_KEEP_STATE"):
+    os.environ["APPDATA"] = tempfile.mkdtemp(prefix="bopomofo-audit-")
 sys.path.insert(0, str(PIME_ROOT / "python"))
 sys.path.insert(
     0,
