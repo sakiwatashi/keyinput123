@@ -481,3 +481,30 @@ class ProperNounTests(unittest.TestCase):
             "六扇門",
             lexicon.candidates(["ㄌㄧㄡˋ", "ㄕㄢˋ", "ㄇㄣˊ"], 1)[0],
         )
+
+
+class PhantomReadingTests(unittest.TestCase):
+    """語料重複收錄留下的假讀音。
+
+    「波」在 ㄅㄛˉ 是 6249、在 ㄆㄛˉ 是 6248——幾乎一模一樣，因為拆分找不到
+    證據可以分。但「波」根本沒有 ㄆㄛˉ 這個音，於是打 ㄆㄛˉ 得到「波」而不是
+    「坡」。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_character_that_owns_the_sound_comes_first(self) -> None:
+        self.assertEqual("坡", self.lexicon.candidates(["ㄆㄛˉ"], 1)[0])
+        self.assertEqual("波", self.lexicon.candidates(["ㄅㄛˉ"], 1)[0])
+        self.assertEqual("與", self.lexicon.candidates(["ㄩˇ"], 1)[0])
+
+    def test_demotion_never_promotes(self) -> None:
+        """上限只准壓低。
+
+        上限是「第一名減一」，而「噢」在 ㄩˇ 底下本來就比那低——少了 min()，
+        壓低反而會把它從第三名抬到第二名。
+        """
+        order = self.lexicon.candidates(["ㄩˇ"], 4)
+        self.assertLess(order.index("雨"), order.index("噢"))

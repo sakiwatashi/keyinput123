@@ -66,6 +66,13 @@ UNUSED_READING_WEIGHT = 1
 #
 # 壓低的是單字權重。多字詞有自己的條目，不受影響——我們、他們、酒吧、嗎啡
 # 都照樣打得出來。
+# 幽靈讀音：這個字根本沒有這個音，是語料重複收錄留下的。判準是它在兩個讀音下
+# 的權重幾乎一模一樣（波 ㄅㄛˉ 6249 / ㄆㄛˉ 6248），拆分找不到證據可以分。
+PHANTOM_READINGS = {
+    "波": ("ㄆㄛˉ",),    # 坡
+    "噢": ("ㄩˇ",),      # 與、雨、語
+}
+
 PARTICLE_ONLY_READINGS = {
     "們": ("ㄇㄣˊ",),    # 門
     "嗎": ("ㄇㄚˉ", "ㄇㄚˇ"),  # 媽、馬
@@ -156,13 +163,16 @@ def single_character_weights(entries: dict[str, list]) -> dict[str, dict[str, in
 def demote_particles(
     entries: dict[str, list], corrections: dict[str, dict[str, int]]
 ) -> None:
-    """把語氣詞壓到本調讀音的真正主人後面。
+    """把語氣詞和幽靈讀音壓到那個音的真正主人後面。
 
     壓到「第二名減一」而不是壓到底：目的是讓它不再排第一，不是把它藏起來。
     要打的人往下捲一格還是找得到。
     """
     by_reading = single_character_weights(entries)
-    for character, readings in PARTICLE_ONLY_READINGS.items():
+    wanted = dict(PARTICLE_ONLY_READINGS)
+    for character, readings in PHANTOM_READINGS.items():
+        wanted[character] = wanted.get(character, ()) + readings
+    for character, readings in wanted.items():
         for reading in readings:
             rivals = [
                 corrections.get(other, {}).get(reading, weight)
@@ -171,8 +181,13 @@ def demote_particles(
             ]
             if not rivals:
                 continue
+            # min()：上限只准壓低，不准抬高。少了它，「噢」在 ㄩˇ 底下會從
+            # 第三名被抬到第二名——上限是「第一名減一」，而它原本就比那低。
+            current = corrections.get(character, {}).get(
+                reading, by_reading.get(reading, {}).get(character, 0)
+            )
             corrections.setdefault(character, {})[reading] = max(
-                UNUSED_READING_WEIGHT, max(rivals) - 1
+                UNUSED_READING_WEIGHT, min(current, max(rivals) - 1)
             )
 
 
