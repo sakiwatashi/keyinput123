@@ -1,0 +1,364 @@
+{
+  "version": 1,
+  "note": "簡轉繁留下的異體字。台灣字頻 0，卻在同讀音下權重高過有字頻的字。",
+  "minimum_weight": 1,
+  "characters": {
+    "爲": {
+      "reading": "ㄨㄟˊ",
+      "weight": 211329,
+      "common": "為",
+      "common_weight": 684,
+      "common_frequency": 5914
+    },
+    "着": {
+      "reading": "ㄓㄜ˙",
+      "weight": 94513,
+      "common": "著",
+      "common_weight": 4115,
+      "common_frequency": 1638
+    },
+    "喫": {
+      "reading": "ㄔˉ",
+      "weight": 65597,
+      "common": "吃",
+      "common_weight": 805,
+      "common_frequency": 369
+    },
+    "裏": {
+      "reading": "ㄌㄧˇ",
+      "weight": 45267,
+      "common": "理",
+      "common_weight": 8676,
+      "common_frequency": 2093
+    },
+    "咯": {
+      "reading": "ㄌㄨㄛˋ",
+      "weight": 29715,
+      "common": "落",
+      "common_weight": 6145,
+      "common_frequency": 411
+    },
+    "羣": {
+      "reading": "ㄑㄩㄣˊ",
+      "weight": 14339,
+      "common": "群",
+      "common_weight": 1000,
+      "common_frequency": 356
+    },
+    "呃": {
+      "reading": "ㄜˋ",
+      "weight": 7963,
+      "common": "惡",
+      "common_weight": 7636,
+      "common_frequency": 150
+    },
+    "麪": {
+      "reading": "ㄇㄧㄢˋ",
+      "weight": 7387,
+      "common": "面",
+      "common_weight": 7375,
+      "common_frequency": 1914
+    },
+    "牀": {
+      "reading": "ㄔㄨㄤˊ",
+      "weight": 4858,
+      "common": "床",
+      "common_weight": 710,
+      "common_frequency": 88
+    },
+    "誒": {
+      "reading": "ㄞˉ",
+      "weight": 4279,
+      "common": "哀",
+      "common_weight": 1290,
+      "common_frequency": 31
+    },
+    "佢": {
+      "reading": "ㄐㄩˋ",
+      "weight": 3707,
+      "common": "具",
+      "common_weight": 3189,
+      "common_frequency": 770
+    },
+    "囧": {
+      "reading": "ㄐㄩㄥˇ",
+      "weight": 3690,
+      "common": "窘",
+      "common_weight": 755,
+      "common_frequency": 11
+    },
+    "乜": {
+      "reading": "ㄋㄧㄝˋ",
+      "weight": 3053,
+      "common": "鎳",
+      "common_weight": 1040,
+      "common_frequency": 30
+    },
+    "叼": {
+      "reading": "ㄉㄧㄠˉ",
+      "weight": 2570,
+      "common": "雕",
+      "common_weight": 1054,
+      "common_frequency": 47
+    },
+    "滬": {
+      "reading": "ㄏㄨˋ",
+      "weight": 2274,
+      "common": "護",
+      "common_weight": 1984,
+      "common_frequency": 378
+    },
+    "浜": {
+      "reading": "ㄅㄥˋ",
+      "weight": 1877,
+      "common": "蹦",
+      "common_weight": 1382,
+      "common_frequency": 4
+    },
+    "僞": {
+      "reading": "ㄨㄟˋ",
+      "weight": 1735,
+      "common": "為",
+      "common_weight": 684,
+      "common_frequency": 5914
+    },
+    "寨": {
+      "reading": "ㄓㄞˋ",
+      "weight": 1493,
+      "common": "責",
+      "common_weight": 1456,
+      "common_frequency": 317
+    },
+    "癡": {
+      "reading": "ㄔˉ",
+      "weight": 1331,
+      "common": "吃",
+      "common_weight": 805,
+      "common_frequency": 369
+    },
+    "甯": {
+      "reading": "ㄋㄧㄥˋ",
+      "weight": 1239,
+      "common": "濘",
+      "common_weight": 484,
+      "common_frequency": 4
+    },
+    "呸": {
+      "reading": "ㄆㄟˉ",
+      "weight": 1033,
+      "common": "胚",
+      "common_weight": 887,
+      "common_frequency": 14
+    },
+    "捻": {
+      "reading": "ㄋㄧㄢˇ",
+      "weight": 1007,
+      "common": "輾",
+      "common_weight": 640,
+      "common_frequency": 5
+    },
+    "囡": {
+      "reading": "ㄋㄢˉ",
+      "weight": 832,
+      "common": "囝",
+      "common_weight": 666,
+      "common_frequency": 1
+    },
+    "碾": {
+      "reading": "ㄋㄧㄢˇ",
+      "weight": 832,
+      "common": "輾",
+      "common_weight": 640,
+      "common_frequency": 5
+    },
+    "艮": {
+      "reading": "ㄍㄣˋ",
+      "weight": 811,
+      "common": "亙",
+      "common_weight": 639,
+      "common_frequency": 3
+    },
+    "馱": {
+      "reading": "ㄊㄨㄛˊ",
+      "weight": 805,
+      "common": "鴕",
+      "common_weight": 619,
+      "common_frequency": 22
+    },
+    "腌": {
+      "reading": "ㄤˉ",
+      "weight": 774,
+      "common": "骯",
+      "common_weight": 605,
+      "common_frequency": 4
+    },
+    "茸": {
+      "reading": "ㄖㄨㄥˇ",
+      "weight": 773,
+      "common": "冗",
+      "common_weight": 600,
+      "common_frequency": 3
+    },
+    "叟": {
+      "reading": "ㄙㄡˇ",
+      "weight": 738,
+      "common": "擻",
+      "common_weight": 613,
+      "common_frequency": 1
+    },
+    "藺": {
+      "reading": "ㄌㄧㄣˋ",
+      "weight": 735,
+      "common": "躪",
+      "common_weight": 404,
+      "common_frequency": 6
+    },
+    "囗": {
+      "reading": "ㄨㄟˊ",
+      "weight": 706,
+      "common": "為",
+      "common_weight": 684,
+      "common_frequency": 5914
+    },
+    "逵": {
+      "reading": "ㄎㄨㄟˊ",
+      "weight": 704,
+      "common": "揆",
+      "common_weight": 564,
+      "common_frequency": 29
+    },
+    "砣": {
+      "reading": "ㄊㄨㄛˊ",
+      "weight": 694,
+      "common": "鴕",
+      "common_weight": 619,
+      "common_frequency": 22
+    },
+    "辟": {
+      "reading": "ㄆㄧˋ",
+      "weight": 678,
+      "common": "譬",
+      "common_weight": 582,
+      "common_frequency": 49
+    },
+    "夔": {
+      "reading": "ㄎㄨㄟˊ",
+      "weight": 656,
+      "common": "揆",
+      "common_weight": 564,
+      "common_frequency": 29
+    },
+    "瓤": {
+      "reading": "ㄖㄤˊ",
+      "weight": 652,
+      "common": "攘",
+      "common_weight": 644,
+      "common_frequency": 3
+    },
+    "馗": {
+      "reading": "ㄎㄨㄟˊ",
+      "weight": 632,
+      "common": "揆",
+      "common_weight": 564,
+      "common_frequency": 29
+    },
+    "臏": {
+      "reading": "ㄅㄧㄣˋ",
+      "weight": 602,
+      "common": "殯",
+      "common_weight": 590,
+      "common_frequency": 6
+    },
+    "腩": {
+      "reading": "ㄋㄢˇ",
+      "weight": 600,
+      "common": "湳",
+      "common_weight": 456,
+      "common_frequency": 2
+    },
+    "蚶": {
+      "reading": "ㄏㄢˉ",
+      "weight": 562,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "罱": {
+      "reading": "ㄋㄢˇ",
+      "weight": 539,
+      "common": "湳",
+      "common_weight": 456,
+      "common_frequency": 2
+    },
+    "衄": {
+      "reading": "ㄋㄩˋ",
+      "weight": 534,
+      "common": "忸",
+      "common_weight": 489,
+      "common_frequency": 1
+    },
+    "滃": {
+      "reading": "ㄨㄥˇ",
+      "weight": 517,
+      "common": "蓊",
+      "common_weight": 458,
+      "common_frequency": 3
+    },
+    "佄": {
+      "reading": "ㄏㄢˉ",
+      "weight": 513,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "戁": {
+      "reading": "ㄋㄢˇ",
+      "weight": 462,
+      "common": "湳",
+      "common_weight": 456,
+      "common_frequency": 2
+    },
+    "嫨": {
+      "reading": "ㄏㄢˉ",
+      "weight": 404,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "頇": {
+      "reading": "ㄏㄢˉ",
+      "weight": 398,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "唅": {
+      "reading": "ㄏㄢˉ",
+      "weight": 379,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "藂": {
+      "reading": "ㄘㄨㄥˋ",
+      "weight": 361,
+      "common": "欉",
+      "common_weight": 322,
+      "common_frequency": 1
+    },
+    "馠": {
+      "reading": "ㄏㄢˉ",
+      "weight": 326,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    },
+    "谽": {
+      "reading": "ㄏㄢˉ",
+      "weight": 314,
+      "common": "魽",
+      "common_weight": 300,
+      "common_frequency": 21
+    }
+  }
+}
