@@ -153,6 +153,18 @@ python -m unittest discover -s tests -v
    git update-ref refs/heads/ime-standalone "$PREV"
    ```
 
+   **列 commit 的範圍要以工作分支上的提交當起點，不是 `ime-standalone` 上的。**
+   兩條歷史沒有共同祖先，所以 `git log <standalone 的 commit>..HEAD` 不會報錯，
+   而是退化成「HEAD 能到、那個 commit 到不了的全部」——實測寫成
+   `755d21c..HEAD` 列出 104 個提交而不是 3 個，照著跑會把整部歷史重新接一次。
+   正確的起點是**上一版的 release commit 在工作分支上的那一個**（訊息相同、
+   hash 不同），例如發 0.8.1 時用 `e1865dc..HEAD`。
+
+   步驟 3 的 `git diff` 為空**不代表做對了**：重建 104 個提交之後內容一樣是
+   對的，錯的是歷史。推之前再看一次
+   `git log --oneline keyinput/main..ime-standalone | wc -l`，數字要跟你打算
+   同步的提交數一致。
+
 3. 驗證同步：`git diff ime-standalone "HEAD:pime-bopomofo-core"` 必須為空。
 4. 在 `ime-standalone` 上打附註 tag：
    `git tag -a vX.Y.Z ime-standalone -m "release: 智慧優先注音 X.Y.Z ..."`
