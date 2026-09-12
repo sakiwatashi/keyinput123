@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bopomofo_core.reading_phrase_lexicon import ReadingPhraseLexicon  # noqa: E402
+from bopomofo_core.taiwan_frequency import TaiwanFrequency  # noqa: E402
 
 OUTPUT = (
     Path(__file__).resolve().parent.parent
@@ -56,12 +57,55 @@ CHARACTER_FAMILIES = {"賬": "帳", "痹": "痺"}
 
 # 逐詞：同一個字在別的詞裡是對的，只有這幾個詞要換。
 #   份 -> 分  只有身分、身分證。一份、月份、股份、年份、省份 在台灣都寫「份」
+# 同分組只在權重夠高時才處理。低權重區的同分多到沒有意義，而那些詞排第一
+# 第二都不影響打字。
+TIE_WEIGHT_FLOOR = 5000
+
 WORD_PAIRS = [
     ("介面", "界面"),
+    # 老闆／老板 同分，而台灣詞頻表兩個都收（「板」有木板等別的用法），所以
+    # 拆不開，只能逐詞列。台灣講老闆，老板不是這個意思。
+    ("老闆", "老板"),
     ("義大利", "意大利"),
     ("身分", "身份"),
     ("身分證", "身份證"),
 ]
+
+
+def tie_groups(lexicon: ReadingPhraseLexicon) -> list[tuple[str, list[str]]]:
+    """同一個讀音下權重完全相同的幾個寫法。
+
+    語料把同一個詞的兩種寫法各收一次、給了一模一樣的次數——那是簡轉繁留下的
+    痕跡，不是「這兩個詞一樣常用」的統計結果。權重相同，誰排第一就只看插入
+    順序，等於沒有依據：
+
+        ㄩˊ ㄕˋ      于是 92369 / 於是 92369
+        ㄈㄨˋ ㄒㄧˊ   復習 39252 / 複習 39252
+        ㄓˋ ㄗㄨㄛˋ   制作 33001 / 製作 33001
+
+    權重門檻只是為了不去動幾乎沒人打的詞——同分在低權重區大量存在，那些排
+    第一第二都無所謂。
+    """
+    groups: list[tuple[str, list[str]]] = []
+    for key, rows in lexicon._entries.items():
+        width = len(key.split(" "))
+        if not 2 <= width <= 4:
+            continue
+        by_weight: dict[int, list[str]] = {}
+        for row in rows:
+            if not isinstance(row, list) or len(row) != 2:
+                continue
+            phrase = row[0]
+            if not isinstance(phrase, str) or len(phrase) != width:
+                continue
+            try:
+                by_weight.setdefault(int(row[1]), []).append(phrase)
+            except (TypeError, ValueError):
+                continue
+        for weight, members in by_weight.items():
+            if weight >= TIE_WEIGHT_FLOOR and len(members) >= 2:
+                groups.append((key, members))
+    return groups
 
 
 def index_of(lexicon: ReadingPhraseLexicon) -> dict[str, set[str]]:
@@ -90,8 +134,18 @@ def main() -> int:
         readings = key.split(" ")
         low = lexicon.weight(readings, preferred)
         high = lexicon.weight(readings, other)
-        if high <= low:
+        if high < low:
             return  # 台灣寫法本來就在前面，不用動
+        if high == low:
+            # 同分：誰排第一只看插入順序，權重看不出來，要問實際的候選順序。
+            # 加一分就夠——目的是排到前面，不是把對方壓下去。
+            order = lexicon.candidates(readings, 20)
+            if preferred in order and other in order:
+                if order.index(preferred) < order.index(other):
+                    return
+            swaps.setdefault(key, {})[preferred] = low + 1
+            report.append((1, preferred, low, other, high, key))
+            return
         swaps.setdefault(key, {})[preferred] = high
         swaps[key][other] = low
         report.append((high - low, preferred, low, other, high, key))
@@ -107,6 +161,27 @@ def main() -> int:
         for taiwan, mainland in WORD_PAIRS:
             if taiwan in phrases and mainland in phrases:
                 consider(key, taiwan, mainland)
+
+    # 同分組：權重一樣就沒有依據，用台灣詞頻表這份獨立的來源當判準。只有
+    # 「剛好一個被收錄」才動——兩個都收（老闆／老板）或都沒收（詞匯／詞彙）
+    # 表示這份資料分不出來，那就別猜，維持原樣。
+    frequency = TaiwanFrequency()
+    tie_broken = 0
+    for key, members in tie_groups(lexicon):
+        recognised = [
+            phrase for phrase in members if frequency.contains_phrase(phrase)
+        ]
+        if len(recognised) != 1:
+            continue
+        preferred = recognised[0]
+        if members.index(preferred) == 0:
+            continue          # 本來就排第一
+        readings = key.split(" ")
+        weight = lexicon.weight(readings, preferred)
+        swaps.setdefault(key, {})[preferred] = weight + 1
+        tie_broken += 1
+        report.append((1, preferred, weight, members[0], weight, key))
+    print(f"同分組由台灣詞頻表拆開 {tie_broken} 組")
 
     payload = {
         "version": 1,

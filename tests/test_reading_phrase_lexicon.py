@@ -508,3 +508,54 @@ class PhantomReadingTests(unittest.TestCase):
         """
         order = self.lexicon.candidates(["ㄩˇ"], 4)
         self.assertLess(order.index("雨"), order.index("噢"))
+
+
+class EqualWeightTieTests(unittest.TestCase):
+    """同一個讀音下權重完全相同的兩個寫法。
+
+    語料把同一個詞的兩種寫法各收一次、給了一模一樣的次數——那是簡轉繁留下的
+    痕跡，不是「兩個一樣常用」的統計。權重相同，誰排第一就只看插入順序，
+    等於沒有依據。用台灣詞頻表這份獨立來源當判準。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_taiwan_spelling_wins_the_tie(self) -> None:
+        for readings, expected in (
+            (["ㄩˊ", "ㄕˋ"], "於是"),
+            (["ㄈㄨˋ", "ㄒㄧˊ"], "複習"),
+            (["ㄓˋ", "ㄗㄨㄛˋ"], "製作"),
+            (["ㄈㄢˇ", "ㄈㄨˋ"], "反覆"),
+            (["ㄌㄠˇ", "ㄅㄢˇ"], "老闆"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 的同分沒有被拆開",
+            )
+
+    def test_the_other_spelling_is_still_there(self) -> None:
+        self.assertIn("于是", self.lexicon.candidates(["ㄩˊ", "ㄕˋ"]))
+        self.assertIn("老板", self.lexicon.candidates(["ㄌㄠˇ", "ㄅㄢˇ"]))
+
+    def test_a_tie_the_evidence_cannot_settle_is_left_alone(self) -> None:
+        """這一條是護欄，不是功能測試。
+
+        提升／提昇、了解／瞭解、計劃／計畫、宣佈／宣布 在台灣都是兩種都用，
+        而台灣詞頻表兩個都收錄——那表示這份資料分不出來，不是叫我們去猜。
+        把判準放寬成「挑一個」，這裡就會紅。
+        """
+        for readings, first in (
+            (["ㄊㄧˊ", "ㄕㄥˉ"], "提升"),
+            (["ㄌㄧㄠˇ", "ㄐㄧㄝˇ"], "了解"),
+            (["ㄐㄧˋ", "ㄏㄨㄚˋ"], "計劃"),
+            (["ㄒㄩㄢˉ", "ㄅㄨˋ"], "宣佈"),
+        ):
+            self.assertEqual(
+                first,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 本來就分不出來，不該被動",
+            )
+
