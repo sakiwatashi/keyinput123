@@ -559,3 +559,55 @@ class EqualWeightTieTests(unittest.TestCase):
                 f"{' '.join(readings)} 本來就分不出來，不該被動",
             )
 
+
+class ReadingOwnershipTests(unittest.TestCase):
+    """一個字被收在它沒有的讀音底下。
+
+    那 的讀音是 ㄋㄚˋ，哪 才是 ㄋㄚˇ。書寫時很多人用「那」代替「哪」，語料
+    照單全收，於是「那X」大量掛在 ㄋㄚˇ 底下並壓過「哪X」——打三聲得到「那」。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lexicon = ReadingPhraseLexicon()
+
+    def test_the_third_tone_belongs_to_the_other_character(self) -> None:
+        for readings, expected in (
+            (["ㄋㄚˇ"], "哪"),
+            (["ㄋㄚˇ", "ㄍㄜ˙"], "哪個"),
+            (["ㄋㄚˇ", "ㄒㄧㄝˉ"], "哪些"),
+            (["ㄋㄚˇ", "ㄓㄨㄥˇ"], "哪種"),
+            (["ㄋㄚˇ", "ㄌㄧˇ"], "哪裡"),
+            (["ㄋㄚˇ", "ㄕˊ", "ㄏㄡˋ"], "哪時候"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 的第一個候選不是「{expected}」",
+            )
+
+    def test_the_fourth_tone_is_untouched(self) -> None:
+        """「那」在自己的讀音下必須完全不受影響。
+
+        讓出 ㄋㄚˇ 的前提是 ㄋㄚˋ 還在——否則就不是「各自回到自己的讀音」，
+        而是把一個常用字弄得打不出來。把 READING_OWNERS 的鍵寫成 ㄋㄚˋ，
+        這裡就會紅。
+        """
+        for readings, expected in (
+            (["ㄋㄚˋ"], "那"),
+            (["ㄋㄚˋ", "ㄍㄜ˙"], "那個"),
+            (["ㄋㄚˋ", "ㄒㄧㄝˉ"], "那些"),
+            (["ㄋㄚˋ", "ㄌㄧˇ"], "那裡"),
+            (["ㄕㄚˋ", "ㄋㄚˋ"], "霎那"),
+        ):
+            self.assertEqual(
+                expected,
+                self.lexicon.candidates(readings, 1)[0],
+                f"{' '.join(readings)} 被動到了",
+            )
+
+    def test_the_borrowed_spelling_is_still_available(self) -> None:
+        # 讓位不是刪除。習慣打三聲的人往下捲一格還是找得到。
+        self.assertIn("那個", self.lexicon.candidates(["ㄋㄚˇ", "ㄍㄜ˙"]))
+        self.assertIn("那", self.lexicon.candidates(["ㄋㄚˇ"]))
+

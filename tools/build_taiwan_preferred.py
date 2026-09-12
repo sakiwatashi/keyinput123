@@ -57,6 +57,25 @@ CHARACTER_FAMILIES = {"賬": "帳", "痹": "痺"}
 
 # 逐詞：同一個字在別的詞裡是對的，只有這幾個詞要換。
 #   份 -> 分  只有身分、身分證。一份、月份、股份、年份、省份 在台灣都寫「份」
+# 讀音的歸屬。跟上面的台灣／大陸用字是兩回事：這裡的問題是語料把一個字收在
+# 它沒有的讀音底下。
+#
+#   那 的讀音是 ㄋㄚˋ，哪 才是 ㄋㄚˇ。但書寫時很多人用「那」代替「哪」，
+#   語料照單全收，於是「那X」大量掛在 ㄋㄚˇ 底下並壓過「哪X」：
+#
+#       ㄋㄚˇ            哪 33103  輸給  那 129343
+#       ㄋㄚˇ ㄒㄧㄝˉ     哪些 38358  輸給  那些 118325
+#       ㄋㄚˇ ㄍㄜ˙      哪個 46216  輸給  那個 118070
+#
+#   「那X」在 ㄋㄚˋ 底下完全正常（那個／那些／那裡都打得出來），所以把 ㄋㄚˇ
+#   讓給「哪」不會讓任何字變得打不出來，只是各自回到自己的讀音。57 組。
+#
+# 只換「讀音正好落在那個音上的那一個字」，不是整個詞掃過去。目前的詞庫裡找不
+# 到反例（鍵裡有 ㄋㄚˇ 而「那」出現在別的位置的詞：0 個），所以這一點沒有測試
+# 蓋得到——寫在這裡是因為換成整詞替換要等資料變動之後才會出事，那時沒有人會
+# 記得原本為什麼要看位置。
+READING_OWNERS = {"ㄋㄚˇ": ("那", "哪")}
+
 # 同分組只在權重夠高時才處理。低權重區的同分多到沒有意義，而那些詞排第一
 # 第二都不影響打字。
 TIE_WEIGHT_FLOOR = 5000
@@ -161,6 +180,19 @@ def main() -> int:
         for taiwan, mainland in WORD_PAIRS:
             if taiwan in phrases and mainland in phrases:
                 consider(key, taiwan, mainland)
+
+        readings = key.split(" ")
+        for index, reading in enumerate(readings):
+            owner = READING_OWNERS.get(reading)
+            if owner is None:
+                continue
+            borrowed, rightful = owner
+            for phrase in sorted(phrases):
+                if len(phrase) != len(readings) or phrase[index] != borrowed:
+                    continue
+                twin = phrase[:index] + rightful + phrase[index + 1:]
+                if twin in phrases:
+                    consider(key, twin, phrase)
 
     # 同分組：權重一樣就沒有依據，用台灣詞頻表這份獨立的來源當判準。只有
     # 「剛好一個被收錄」才動——兩個都收（老闆／老板）或都沒收（詞匯／詞彙）
