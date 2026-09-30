@@ -37,6 +37,10 @@ const COLORREF kSelectedBackground = RGB(231, 235, 248);
 // says what a click would pick, not what Enter will commit.
 const COLORREF kHoverBackground = RGB(242, 243, 247);
 const COLORREF kSelectedLabel = RGB(72, 83, 145);
+// Autocomplete text is a suggestion, not something typed yet, so it sits a
+// step quieter than candidate text -- the closest this surface gets to the
+// ghost text an editor draws inline.
+const COLORREF kHintText = RGB(140, 134, 125);
 
 void fillRoundRect(HDC hdc, const RECT& rect, int radius, COLORREF color) {
     HBRUSH brush = ::CreateSolidBrush(color);
@@ -73,6 +77,7 @@ void candidateGrid(int itemCount, int maxColumns, int& rows, int& columns) {
 }
 
 CandidateRenderer::CandidateRenderer():
+    hintMode_(false),
     selection_(0),
     hover_(-1),
     candPerRow_(2),
@@ -106,6 +111,8 @@ void CandidateRenderer::setDpi(int dpi) {
 
 void CandidateRenderer::setCandidates(const std::vector<std::wstring>& items,
                                       const std::wstring& selectionKeys) {
+    hintMode_ = false;
+    hintText_.clear();
     items_ = items;
     selectionKeys_ = selectionKeys;
     if (selection_ >= static_cast<int>(items_.size()))
@@ -132,6 +139,47 @@ void CandidateRenderer::setCandPerRow(int candPerRow) {
 
 void CandidateRenderer::setUseCursor(bool useCursor) {
     useCursor_ = useCursor;
+}
+
+void CandidateRenderer::setHint(const std::wstring& text) {
+    hintMode_ = true;
+    hintText_ = text;
+    items_.clear();
+    selection_ = 0;
+    hover_ = -1;
+}
+
+void CandidateRenderer::measureHint(HDC hdc, SIZE& badge, SIZE& text) const {
+    const wchar_t kTab[] = L"Tab";
+    ::GetTextExtentPoint32W(hdc, kTab, 3, &badge);
+    badge.cx += scaled(12);
+    badge.cy += scaled(2);
+    text.cx = 0;
+    text.cy = 0;
+    ::GetTextExtentPoint32W(hdc, hintText_.c_str(),
+                            static_cast<int>(hintText_.length()), &text);
+}
+
+void CandidateRenderer::paintHint(HDC hdc) const {
+    SIZE badge = {0, 0};
+    SIZE text = {0, 0};
+    measureHint(hdc, badge, text);
+    int height = std::max(badge.cy, text.cy);
+    int top = scaled(8);
+
+    RECT keycap = {
+        scaled(10),
+        top + (height - badge.cy) / 2,
+        scaled(10) + badge.cx,
+        top + (height - badge.cy) / 2 + badge.cy
+    };
+    fillRoundRect(hdc, keycap, scaled(8), kSelectedBackground);
+    ::SetTextColor(hdc, kSelectedLabel);
+    ::TextOutW(hdc, keycap.left + scaled(6), keycap.top + scaled(1), L"Tab", 3);
+
+    ::SetTextColor(hdc, kHintText);
+    ::TextOutW(hdc, keycap.right + scaled(8), top + (height - text.cy) / 2,
+               hintText_.c_str(), static_cast<int>(hintText_.length()));
 }
 
 void CandidateRenderer::measureCells(HDC hdc) const {
@@ -166,6 +214,16 @@ void CandidateRenderer::measureCells(HDC hdc) const {
 }
 
 SIZE CandidateRenderer::measure(HDC hdc) const {
+    if (hintMode_) {
+        SIZE badge = {0, 0};
+        SIZE text = {0, 0};
+        measureHint(hdc, badge, text);
+        SIZE hint = {
+            scaled(10) + badge.cx + scaled(8) + text.cx + scaled(12),
+            std::max(badge.cy, text.cy) + scaled(16)
+        };
+        return hint;
+    }
     SIZE size = {margin_ * 2, margin_ * 2};
     if (items_.empty())
         return size;
@@ -198,6 +256,8 @@ void CandidateRenderer::itemRect(int index, RECT& rect) const {
 }
 
 int CandidateRenderer::hitTest(POINT point) const {
+    if (hintMode_)
+        return -1;
     for (size_t i = 0; i < items_.size(); ++i) {
         RECT cell;
         itemRect(static_cast<int>(i), cell);
@@ -254,6 +314,11 @@ void CandidateRenderer::paint(HDC hdc, const RECT& client) const {
     ::SelectObject(hdc, oldBrush);
     ::SelectObject(hdc, oldPen);
     ::DeleteObject(borderPen);
+
+    if (hintMode_) {
+        paintHint(hdc);
+        return;
+    }
 
     for (size_t i = 0; i < items_.size(); ++i) {
         RECT cell;

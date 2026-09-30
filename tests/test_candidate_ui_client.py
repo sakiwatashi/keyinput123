@@ -9,6 +9,7 @@ from bopomofo_core.candidate_ui_client import (
     CandidateUiClient,
     default_helper_path,
     encode_hide,
+    encode_hint,
     encode_show,
     mirror_enabled,
     shared_client,
@@ -96,6 +97,20 @@ class NonBlockingTest(unittest.TestCase):
         while not client._queue.empty():
             client._queue.get_nowait()
         client.show([], 0)
+        self.assertEqual(client._queue.get_nowait(), encode_hide())
+        client.close()
+
+    def test_hint_is_one_framed_field(self):
+        # The helper reads field 1 as the hint text. A separator or line break
+        # smuggled into it would split one hint into a second, garbage message.
+        client = absent_client()
+        client._ensure_worker()
+        while not client._queue.empty():
+            client._queue.get_nowait()
+        client.show_hint("您的\x1f協\n助")
+        self.assertEqual(client._queue.get_nowait(), encode_hint("您的協助"))
+        self.assertEqual(encode_hint("您的協助"), "HINT\x1f您的協助\n")
+        client.show_hint("\n")
         self.assertEqual(client._queue.get_nowait(), encode_hide())
         client.close()
 

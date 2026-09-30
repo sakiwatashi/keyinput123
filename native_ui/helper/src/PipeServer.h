@@ -28,6 +28,10 @@ struct CandidateUpdate {
     bool show = false;
     int selection = 0;
     std::vector<std::wstring> items;
+    // An autocomplete hint instead of a candidate page: one line of text that
+    // Tab would append. Drawn in the candidate window's own chrome.
+    bool hint = false;
+    std::wstring hintText;
 };
 
 class PipeServer {

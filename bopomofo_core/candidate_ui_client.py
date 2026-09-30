@@ -85,6 +85,7 @@ def default_helper_path() -> str:
 # so a unit separator frames the message without any escaping.
 _SHOW = "SHOW"
 _HIDE = "HIDE"
+_HINT = "HINT"
 
 
 def encode_show(candidates, selection):
@@ -96,6 +97,11 @@ def encode_show(candidates, selection):
 
 def encode_hide():
     return _HIDE + "\n"
+
+
+def encode_hint(text):
+    """Builds the wire line for an autocomplete hint: the text Tab would append."""
+    return _FIELD_SEPARATOR.join([_HINT, text]) + "\n"
 
 
 class CandidateUiClient:
@@ -190,6 +196,20 @@ class CandidateUiClient:
 
     def hide(self) -> None:
         self._offer(encode_hide())
+
+    def show_hint(self, text: str) -> None:
+        """Draws the autocomplete hint in the candidate window's own chrome.
+
+        The helper anchors it to PIME's message window, which the input method
+        shows as a blank marker for exactly as long as the hint is live.
+        """
+        # The hint is text the user typed before, so it holds no separators or
+        # line breaks; a stray one must still never split the frame in two.
+        clean = text.replace(_FIELD_SEPARATOR, "").replace("\n", "").replace("\r", "")
+        if not clean:
+            self.hide()
+            return
+        self._offer(encode_hint(clean))
 
     def close(self) -> None:
         if not self._started:

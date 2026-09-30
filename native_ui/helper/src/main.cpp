@@ -84,6 +84,10 @@ struct AppState {
     // Until the Python layer has sent something, the window stays hidden rather
     // than showing stale placeholder text over a real composition.
     bool hasCandidates = false;
+    // Showing an autocomplete hint rather than a candidate page. A hint lives
+    // exactly as long as its beacon (PIME's message window), so unlike a page
+    // it is never kept alive at a remembered anchor.
+    bool hint = false;
     // Whether the pipe is currently accepting updates. Starts closed so the
     // foreground application is judged before anything is served.
     bool serving = false;
@@ -258,7 +262,7 @@ void syncToBeacon(AppState& state) {
     Beacon beacon;
     if (!findBeacon(beacon)) {
         state.beacon = Beacon();
-        if (state.hasLastAnchor) {
+        if (state.hasLastAnchor && !state.hint) {
             // Candidates are still live, so keep them readable at the last
             // known position rather than blanking the only copy on screen.
             layoutAndShow(state, state.lastAnchor, nullptr);
@@ -314,6 +318,17 @@ void onPaint(AppState& state) {
 void selectCandidateByClick(AppState& state, POINT point) {
     if (!state.serving || !state.visible)
         return;
+    if (state.hint) {
+        // Clicking the hint accepts it, through the same Tab the keyboard uses.
+        INPUT tab[2] = {};
+        tab[0].type = INPUT_KEYBOARD;
+        tab[0].ki.wVk = VK_TAB;
+        tab[1].type = INPUT_KEYBOARD;
+        tab[1].ki.wVk = VK_TAB;
+        tab[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        ::SendInput(2, tab, sizeof(INPUT));
+        return;
+    }
     int index = state.renderer.hitTest(point);
     if (index < 0 || index > 9)
         return;
@@ -376,6 +391,15 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SmartPriority::CandidateUpdate update;
         if (!g_state.pipe.takeLatest(update))
             return 0;
+        if (update.show && update.hint) {
+            g_state.renderer.setHint(update.hintText);
+            g_state.hint = true;
+            g_state.hasCandidates = true;
+            g_state.hasLastAnchor = false;
+            syncToBeacon(g_state);
+            return 0;
+        }
+        g_state.hint = false;
         if (!update.show || update.items.empty()) {
             g_state.hasCandidates = false;
             // The composition ended, so the remembered anchor is stale and
@@ -453,6 +477,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         setDpiContext(reinterpret_cast<HANDLE>(-4)); // PER_MONITOR_AWARE_V2
 
     std::vector<std::wstring> candidates;
+    std::wstring demoHint;
     int argc = 0;
     LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
     for (int i = 1; i < argc; ++i) {
@@ -461,6 +486,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             g_state.demoMode = true;
             g_state.demoOrigin.x = 400;
             g_state.demoOrigin.y = 400;
+        } else if (argument.rfind(L"--hint=", 0) == 0) {
+            // --demo --hint=... draws the autocomplete hint for visual checks.
+            demoHint = argument.substr(7);
         } else if (argument.rfind(L"--candidates=", 0) == 0) {
             candidates = parseCandidates(argument.substr(13));
         } else if (argument.rfind(L"--check-policy=", 0) == 0) {
@@ -545,6 +573,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                          L"智慧優先注音 —— 雙擊開啟控制台");
     }
 
+    if (g_state.demoMode && !demoHint.empty()) {
+        g_state.renderer.setHint(demoHint);
+        g_state.hint = true;
+    }
     if (g_state.demoMode) {
         g_state.hasCandidates = true;
         layoutAndShow(g_state, g_state.demoOrigin, nullptr);

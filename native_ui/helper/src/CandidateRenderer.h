@@ -62,6 +62,11 @@ public:
     int hover() const { return hover_; }
     void setCandPerRow(int candPerRow);
     void setUseCursor(bool useCursor);
+    // Switches to the autocomplete hint: a Tab keycap followed by the text Tab
+    // would append, in the same surface as the candidate grid. setCandidates()
+    // switches back.
+    void setHint(const std::wstring& text);
+    bool isHint() const { return hintMode_; }
 
     int selection() const { return selection_; }
     size_t count() const { return items_.size(); }
@@ -80,6 +85,11 @@ private:
     void paintItem(HDC hdc, int index, int x, int y) const;
     void measureCells(HDC hdc) const;
 
+    void measureHint(HDC hdc, SIZE& badge, SIZE& text) const;
+    void paintHint(HDC hdc) const;
+
+    bool hintMode_;
+    std::wstring hintText_;
     std::vector<std::wstring> items_;
     std::wstring selectionKeys_;
     int selection_;

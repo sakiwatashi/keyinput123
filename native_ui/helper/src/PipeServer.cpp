@@ -95,6 +95,10 @@ void PipeServer::handleLine(const std::string& line, HWND target) {
         update.selection = std::atoi(fields[1].c_str());
         for (size_t i = 2; i < fields.size(); ++i)
             update.items.push_back(fromUtf8(fields[i]));
+    } else if (fields[0] == "HINT" && fields.size() >= 2 && !fields[1].empty()) {
+        update.show = true;
+        update.hint = true;
+        update.hintText = fromUtf8(fields[1]);
     } else {
         return;
     }

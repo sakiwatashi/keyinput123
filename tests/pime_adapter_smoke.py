@@ -2867,6 +2867,65 @@ def main() -> None:
             learned.completion_store.record(xiexie + rest, "謝謝您的協助")
         assert learned.completion_store.suggest(xiexie, ["謝", "謝"]) is not None
 
+        # 候選視窗輔助程式活著時，提示由它畫（跟候選框同一套外觀），PIME 的訊息窗
+        # 只顯示一個空白當定位信標；輔助程式不在就退回訊息窗顯示完整文字。
+        class RecordingMirror:
+            def __init__(self):
+                self.ready = True
+                self.calls = []
+
+            @property
+            def beacon_ready(self):
+                return self.ready
+
+            def show(self, candidates, selection=0):
+                self.calls.append(("show", tuple(candidates)))
+
+            def hide(self):
+                self.calls.append(("hide",))
+
+            def show_hint(self, text):
+                self.calls.append(("hint", text))
+
+            def warm_up(self):
+                pass
+
+        mirror = RecordingMirror()
+        drawn = PinnedBopomofoTextService(DummyClient())
+        drawn.completion_store = completions
+        drawn.candidate_ui = mirror
+        sequence = type_readings(drawn, xiexie[:1], sequence)
+        force_composition_text(drawn, "謝")
+        reply = None
+        for key in keys_for_reading(xiexie[1]):
+            reply = press(drawn, key, sequence)
+            sequence += 1
+        assert drawn.compositionString == "謝謝", drawn.compositionString
+        assert reply.get("showMessage", {}).get("message") == " ", (
+            "輔助程式活著時訊息窗應該只當定位信標", reply.get("showMessage"))
+        assert mirror.calls[-1] == ("hint", "您的協助"), mirror.calls[-3:]
+        # 重繪時候選頁一直是收起來的，那一刻不能送 HIDE，否則提示每按一次鍵就閃一次。
+        before = len(mirror.calls)
+        drawn._render_buffer()
+        assert ("hide",) not in mirror.calls[before:], (
+            "重繪時先把提示收掉了", mirror.calls[before:])
+        assert drawn.completion is not None
+
+        # 輔助程式不在了（例如遊戲在前景，它會拒絕連線）：同一個提示要改回由訊息窗
+        # 顯示完整文字。只剩空白定位框的話，Tab 會接上一個看不見的提示。
+        mirror.ready = False
+        drawn.currentReply = {}
+        drawn._render_buffer()
+        assert drawn.currentReply.get("showMessage", {}).get("message") == "Tab ▸ 您的協助", (
+            "輔助程式斷線後沒有改回完整文字", drawn.currentReply.get("showMessage"))
+        mirror.ready = True
+
+        # 接受之後提示要從輔助程式的視窗消失。
+        special_key(drawn, 0x09, sequence)
+        sequence += 1
+        assert drawn.compositionString == "謝謝您的協助"
+        assert mirror.calls[-1] == ("hide",), mirror.calls[-3:]
+
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
 

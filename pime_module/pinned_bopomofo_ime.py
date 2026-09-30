@@ -205,6 +205,9 @@ class PinnedBopomofoTextService(TextService):
         self.completion: tuple[str, list[str]] | None = None
         # 按 Esc 收掉的那一個提示。同一段組字區不要再冒出同一個提示。
         self.completion_dismissed: tuple | None = None
+        # 提示是不是交給行程外候選視窗畫的。是的話 PIME 的訊息窗只顯示一個空白，
+        # 當作定位信標；不是的話（輔助程式沒在跑）就由訊息窗顯示完整文字。
+        self.completion_via_helper = False
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         # 讀一次就好。打字路徑上碰硬碟會卡住宿主程式的輸入執行緒。
@@ -251,6 +254,13 @@ class PinnedBopomofoTextService(TextService):
         try:
             if self.showCandidates and self.candidateList:
                 self.candidate_ui.show(self.candidateList, self.candidateCursor or 0)
+            elif (
+                getattr(self, "completion", None) is not None
+                and getattr(self, "completion_via_helper", False)
+            ):
+                # 候選頁與提示共用同一個視窗，也共用這一個出口：候選頁一收起來
+                # 就送 HIDE 的話，提示會在每一次按鍵之間閃掉又冒出來。
+                self.candidate_ui.show_hint(self.completion[0])
             else:
                 self.candidate_ui.hide()
         except Exception:
@@ -2043,13 +2053,29 @@ class PinnedBopomofoTextService(TextService):
                 or self._completion_key(suggestion) == self.completion_dismissed
             ):
                 suggestion = None
-        if suggestion == self.completion:
+        via_helper = suggestion is not None and self._helper_can_draw_hint()
+        # 提示沒變、畫的地方也沒變就什麼都不送。畫的地方會變：輔助程式在遊戲
+        # 前景時會拒絕連線，這時必須改回由訊息窗顯示完整文字，否則畫面上只剩
+        # 一個空白的定位框，而 Tab 仍然會接上一個看不見的提示。
+        if suggestion == self.completion and via_helper == self.completion_via_helper:
             return
         self.completion = suggestion
+        self.completion_via_helper = via_helper
         if suggestion is None:
             self.hideMessage()
+        elif via_helper:
+            # 訊息窗只當定位信標：它由原廠簽章 DLL 放在游標正下方，輔助程式
+            # 找到它、蓋上跟候選框同一套外觀的提示。見 native_ui/helper。
+            self.showMessage(" ", COMPLETION_MESSAGE_SECONDS)
         else:
             self.showMessage(f"Tab ▸ {suggestion[0]}", COMPLETION_MESSAGE_SECONDS)
+        self._mirror_candidates()
+
+    def _helper_can_draw_hint(self) -> bool:
+        try:
+            return bool(self.candidate_ui.beacon_ready)
+        except Exception:
+            return False
 
     def _accepts_completion(self, keyEvent) -> bool:
         return (

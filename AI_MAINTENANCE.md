@@ -403,6 +403,17 @@ it and the local reads as `$null`. Static check lives in
   because accepting a suggestion is not a correction and must not teach
   `phrases.json` at commit. While a hint is showing, Esc dismisses the hint
   only; it must not throw away the half-typed sentence.
+  The hint is drawn by the out-of-process helper in the candidate window's own
+  chrome (`HINT` pipe message, `CandidateRenderer::setHint`). PIME's message
+  window is shown as a blank `" "` purely as the position beacon the helper
+  covers -- the signed DLL places it under the caret. When the helper is not
+  connected (`beacon_ready` false, e.g. it refuses the pipe while a game is in
+  front) the message window must carry the full `Tab ▸ ...` text instead, and a
+  hint that is already showing must switch over, or a blank box is all that is
+  left while Tab still accepts. True inline ghost text is not possible on the
+  signed PIME: its protocol has one display attribute for the whole
+  composition, and putting the hint into the composition would hand it to the
+  application as typed text.
 - Numpad 0-9, decimal, divide, multiply, subtract, and add always emit their
   literal ASCII characters and never Bopomofo or candidate numbers.
   Shift+A-Z, shifted ASCII symbols, and Ctrl punctuation replace only an
