@@ -199,6 +199,12 @@ try {
     catch {
         $compilerFailed = $true
     }
+    # The failing compiler is a native process, so its exit code stays in
+    # $LASTEXITCODE after the expected failure. GitHub Actions ends every
+    # PowerShell step with "exit $LASTEXITCODE", which turned this test's PASS
+    # into a failed step and skipped the 0.8.2 release job. The failure was
+    # the point of this check; do not let it leak out as the script's result.
+    $global:LASTEXITCODE = 0
     if (-not $compilerFailed -or
         (Get-Content -LiteralPath (Join-Path $targetModule "version.txt") -Raw).Trim() -ne "new") {
         $problems += "a staged compile failure changed the installed module"
