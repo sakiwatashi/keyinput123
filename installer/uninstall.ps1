@@ -1,5 +1,6 @@
 ﻿$ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
+. (Join-Path $PSScriptRoot "module_transaction.ps1")
 
 function Stop-SmartPriorityCandidateUiAndWait {
     # Stop-Process only signals termination; the executable stays locked
@@ -39,6 +40,8 @@ $moduleName = "pinned_bopomofo"
 $logRoot = Join-Path $env:ProgramData "SmartPriorityBopomofo"
 $logPath = Join-Path $logRoot "uninstall.log"
 $nativeStateRoot = Join-Path $logRoot "native-state"
+$moduleTransactionMutex = $null
+$pimeWasQuitForTransaction = $false
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 Start-Transcript -LiteralPath $logPath -Force | Out-Null
 
@@ -72,13 +75,16 @@ try {
         if ([IO.Path]::GetFullPath($targetModule) -ne $expectedTarget) {
             throw "Refusing to remove an unexpected module path."
         }
+        $moduleTransactionMutex = Enter-SmartPriorityModuleTransactionLock -PimeRoot $resolvedRoot
         $launcher = Join-Path $resolvedRoot "PIMELauncher.exe"
         if (Test-Path -LiteralPath $launcher) {
             Start-Process -FilePath $launcher -ArgumentList "/quit" -Wait
+            $pimeWasQuitForTransaction = $true
         }
         # The candidate window helper keeps its own executable open inside the
         # module directory that is about to be removed.
         Stop-SmartPriorityCandidateUiAndWait
+        Recover-SmartPriorityModuleTransaction -PimeRoot $resolvedRoot | Out-Null
         Remove-DirectoryWithRetry -Path $targetModule
 
         if ((Test-Path -LiteralPath (Join-Path $nativeStateRoot "native-ui.json")) -and
@@ -178,6 +184,7 @@ try {
 
     if ($launcher -and (Test-Path -LiteralPath $launcher)) {
         Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
+        $pimeWasQuitForTransaction = $false
     }
     Write-Output "Smart Priority Bopomofo was removed; PIME and user learning data were preserved."
 }
@@ -191,5 +198,25 @@ catch {
     throw
 }
 finally {
-    Stop-Transcript | Out-Null
+    try {
+        if ($pimeWasQuitForTransaction -and $launcher -and (Test-Path -LiteralPath $launcher)) {
+            try {
+                Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
+            }
+            catch {
+                Write-Output "Could not restart PIME after the module transaction: $($_.Exception.Message)"
+            }
+        }
+    }
+    finally {
+        try {
+            if ($null -ne $moduleTransactionMutex) {
+                Exit-SmartPriorityModuleTransactionLock -Mutex $moduleTransactionMutex
+            }
+        }
+        finally {
+            $moduleTransactionMutex = $null
+            Stop-Transcript | Out-Null
+        }
+    }
 }

@@ -35,20 +35,26 @@ try {
     $payloadDir = Join-Path $fileRoot "payload"
     New-Item -ItemType Directory -Path $payloadDir -Force | Out-Null
     $newUninstall = Join-Path $payloadDir "uninstall.ps1"
+    $newTransactionHelper = Join-Path $payloadDir "module_transaction.ps1"
     Set-Content -LiteralPath $newUninstall -Value "new" -Encoding ASCII
+    Set-Content -LiteralPath $newTransactionHelper -Value "transaction-helper-new" -Encoding ASCII
+    $newUninstallPayload = @($newUninstall, $newTransactionHelper)
 
     # --- 1. 存在的紀錄：腳本換新、版本號更新；不存在的那個檢視不能被建立 ---
     $good = New-Entry -Name "Good" -WithUninstaller $true
     $missing = Join-Path $registryRoot "Missing"
-    $result = Sync-UninstallEntry -Version "0.8.1" -RegistryPaths @($missing, $good.Key) -PayloadFiles @($newUninstall)
+    $result = Sync-UninstallEntry -Version "0.8.1" -RegistryPaths @($missing, $good.Key) -PayloadFiles $newUninstallPayload
     if ((Read-Version $good.Key) -ne "0.8.1") { $problems += "存在的紀錄沒有被更新成 0.8.1" }
     if ((Read-Script $good.Dir) -ne "new") { $problems += "安裝目錄裡的 uninstall.ps1 沒有換成新版" }
+    if ((Get-Content -LiteralPath (Join-Path $good.Dir "module_transaction.ps1") -Raw).Trim() -ne "transaction-helper-new") {
+        $problems += "新版 uninstall.ps1 的 module_transaction.ps1 相依檔沒有同步到安裝目錄"
+    }
     if (Test-Path -LiteralPath $missing) { $problems += "不存在的登錄檢視被憑空建立了" }
     if ($result.Updated -notcontains $good.Key) { $problems += "回傳值沒有列出更新的紀錄" }
 
     # --- 2. 安裝目錄裡沒有 Uninstall.exe：什麼都不動 ---
     $orphan = New-Entry -Name "NoUninstaller" -WithUninstaller $false
-    $result = Sync-UninstallEntry -Version "0.8.1" -RegistryPaths @($orphan.Key) -PayloadFiles @($newUninstall)
+    $result = Sync-UninstallEntry -Version "0.8.1" -RegistryPaths @($orphan.Key) -PayloadFiles $newUninstallPayload
     if ((Read-Version $orphan.Key) -ne "0.6.5") { $problems += "沒有 Uninstall.exe 的紀錄版本號被改了" }
     if ((Read-Script $orphan.Dir) -ne "old") { $problems += "沒有 Uninstall.exe 的安裝目錄被寫入了" }
     if ($result.Skipped.Count -ne 1) { $problems += "跳過的紀錄沒有被回報" }
@@ -58,7 +64,7 @@ try {
     $threw = $false
     try {
         Sync-UninstallEntry -Version "0.8.1" -RegistryPaths @($broken.Key) `
-            -PayloadFiles @($newUninstall, (Join-Path $payloadDir "does-not-exist.ps1")) | Out-Null
+            -PayloadFiles @($newUninstall, $newTransactionHelper, (Join-Path $payloadDir "does-not-exist.ps1")) | Out-Null
     }
     catch { $threw = $true }
     if (-not $threw) { $problems += "缺檔時沒有丟出錯誤" }
@@ -66,8 +72,15 @@ try {
 
     # --- 4. install.ps1 真的有接上，而且兩個檢視都有找 ---
     $install = Get-Content -LiteralPath (Join-Path $projectRoot "install.ps1") -Raw
-    foreach ($needle in @("Sync-UninstallEntry", "WOW6432Node", "ime.json")) {
+    foreach ($needle in @("Sync-UninstallEntry", "WOW6432Node", "ime.json", "module_transaction.ps1")) {
         if ($install -notmatch [regex]::Escape($needle)) { $problems += "install.ps1 少了 $needle" }
+    }
+    $payloadIndex = $install.IndexOf('-PayloadFiles')
+    $helperPayloadIndex = if ($payloadIndex -ge 0) {
+        $install.IndexOf('"module_transaction.ps1"', $payloadIndex)
+    } else { -1 }
+    if ($helperPayloadIndex -lt 0) {
+        $problems += "install.ps1 沒有把 module_transaction.ps1 放進新版解除安裝 payload"
     }
 }
 finally {

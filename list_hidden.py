@@ -33,7 +33,7 @@ def main() -> int:
     frequency = TaiwanFrequency()
 
     if floor <= 0:
-        print(json.dumps({"floor": floor, "hidden": [], "protected": 0, "below": 0}))
+        print(json.dumps({"floor": floor, "hidden": [], "protected": 0, "below": 0}, ensure_ascii=True))
         return 0
 
     # Ask the real rule, with the user's own lists applied, so what the panel
@@ -63,13 +63,16 @@ def main() -> int:
         if not store.is_hidden(character, floor=floor)
     )
 
+    # Windows PowerShell 5.1 decodes native-process pipes with the active code
+    # page. ASCII escapes survive every code page; ConvertFrom-Json restores
+    # the original characters on the PowerShell side.
     print(json.dumps({
         "floor": floor,
         "hidden": hidden,
         "protected": len(below) - len(hidden),
         "protected_scores": protected_scores,
         "below": len(below),
-    }, ensure_ascii=False))
+    }, ensure_ascii=True))
     return 0
 
 

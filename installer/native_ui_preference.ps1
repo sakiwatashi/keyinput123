@@ -98,6 +98,36 @@ function Resolve-SmartPriorityNativeUiPreference {
         -PimeRoot $PimeRoot -StateRoot $StateRoot
 }
 
+function Test-SmartPriorityNativeUiEligibility {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PimeRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$NativeUiPayload,
+        [bool]$Requested = $false,
+        [string[]]$PythonModulesRemovedByInstaller = @()
+    )
+
+    if (-not $Requested) { return $false }
+
+    $pythonMethods = Join-Path $PimeRoot "python\input_methods"
+    $nodeMethods = Join-Path $PimeRoot "node\input_methods"
+    $excludedPythonModules = @("pinned_bopomofo", "__pycache__") + @($PythonModulesRemovedByInstaller)
+    $otherPythonModules = @(
+        Get-ChildItem -LiteralPath $pythonMethods -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin $excludedPythonModules }
+    )
+    $otherNodeModules = @(
+        Get-ChildItem -LiteralPath $nodeMethods -Directory -ErrorAction SilentlyContinue
+    )
+
+    return (
+        $otherPythonModules.Count -eq 0 -and $otherNodeModules.Count -eq 0 -and
+        (Test-Path -LiteralPath (Join-Path $NativeUiPayload "x86\PIMETextService.dll")) -and
+        (Test-Path -LiteralPath (Join-Path $NativeUiPayload "x64\PIMETextService.dll"))
+    )
+}
+
 function Save-SmartPriorityNativeUiPreference {
     param(
         [Parameter(Mandatory = $true)]

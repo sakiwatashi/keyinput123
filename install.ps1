@@ -105,6 +105,7 @@ try {
         (Join-Path $installerRoot "install.ps1"),
         (Join-Path $installerRoot "native_ui_preference.ps1"),
         (Join-Path $installerRoot "restore_signed_text_service.ps1"),
+        (Join-Path $installerRoot "module_transaction.ps1"),
         (Join-Path $installerRoot "uninstall.ps1"),
         (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt")
     )

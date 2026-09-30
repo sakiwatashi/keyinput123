@@ -8,6 +8,7 @@
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "native_ui_preference.ps1")
 . (Join-Path $PSScriptRoot "restore_signed_text_service.ps1")
+. (Join-Path $PSScriptRoot "module_transaction.ps1")
 
 function Find-PimeInstallRoot {
     param([string[]]$RegistryPaths)
@@ -63,23 +64,10 @@ function Stop-SmartPriorityCandidateUiAndWait {
         Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
     }
     foreach ($helper in $helpers) {
-        try { $helper.WaitForExit(5000) | Out-Null } catch {}
-    }
-}
-
-function Remove-DirectoryWithRetry {
-    param([string]$Path)
-    # Just-terminated processes and antivirus scans can hold a lock for a
-    # beat longer; a few short retries beat failing the whole run.
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
-        if (-not (Test-Path -LiteralPath $Path)) { return }
-        try {
-            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-            return
-        }
-        catch {
-            if ($attempt -eq 10) { throw }
-            Start-Sleep -Milliseconds 500
+        $exited = $false
+        try { $exited = $helper.WaitForExit(5000) } catch {}
+        if (-not $exited -and (Get-Process -Id $helper.Id -ErrorAction SilentlyContinue)) {
+            throw "Timed out waiting for SmartPriorityCandidateUI or its control panel to exit (PID $($helper.Id))."
         }
     }
 }
@@ -90,6 +78,9 @@ $logPath = Join-Path $logRoot "install.log"
 $nativeStateRoot = Join-Path $logRoot "native-state"
 $nativePreferencePath = Join-Path $logRoot "native-ui-preference.json"
 $installedPimeThisRun = $false
+$moduleTransactionMutex = $null
+$pimeWasQuitForTransaction = $false
+$launcher = $null
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 Start-Transcript -LiteralPath $logPath -Force | Out-Null
 
@@ -146,9 +137,55 @@ try {
         throw "The PIME directory is outside Program Files: $resolvedRoot"
     }
 
+    $targetParent = Join-Path $resolvedRoot "python\input_methods"
+    $targetModule = Join-Path $targetParent $moduleName
+    $expectedTarget = [IO.Path]::GetFullPath((Join-Path $resolvedRoot "python\input_methods\$moduleName"))
+    if ([IO.Path]::GetFullPath($targetModule) -ne $expectedTarget) {
+        throw "Refusing to write to an unexpected module path."
+    }
+
+    # Serialize install, recovery, and uninstall for this PIME root. A stale
+    # backup must be restored before eligibility checks inspect the module tree.
+    $moduleTransactionMutex = Enter-SmartPriorityModuleTransactionLock -PimeRoot $resolvedRoot
     $launcher = Join-Path $resolvedRoot "PIMELauncher.exe"
-    if (Test-Path -LiteralPath $launcher) {
+    $staleTransactions = @(Get-SmartPriorityModuleTransactionRoots -PimeRoot $resolvedRoot)
+    if ($staleTransactions.Count -gt 0) {
+        if (Test-Path -LiteralPath $launcher) {
+            Start-Process -FilePath $launcher -ArgumentList "/quit" -Wait
+            $pimeWasQuitForTransaction = $true
+        }
+        Stop-SmartPriorityCandidateUiAndWait
+        Recover-SmartPriorityModuleTransaction -PimeRoot $resolvedRoot | Out-Null
+    }
+
+    # Resolve remembered preferences and verify all native UI prerequisites
+    # before stopping PIME or replacing the currently working module.
+    $useUnsignedNativeUi = Resolve-SmartPriorityNativeUiPreference `
+        -PreferencePath $nativePreferencePath `
+        -PimeRoot $resolvedRoot `
+        -StateRoot $nativeStateRoot `
+        -EnableUnsignedNativeUi:$EnableUnsignedNativeUi `
+        -DisableUnsignedNativeUi:$DisableUnsignedNativeUi
+    $nativeUiPayload = Join-Path $PayloadRoot "overlay\native_ui\bin"
+    $pythonModulesRemovedByInstall = if ($installedPimeThisRun) { @("chewing") } else { @() }
+    $canInstallNativeUi = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $resolvedRoot `
+        -NativeUiPayload $nativeUiPayload `
+        -Requested $useUnsignedNativeUi `
+        -PythonModulesRemovedByInstaller $pythonModulesRemovedByInstall
+    if ($useUnsignedNativeUi -and -not $canInstallNativeUi) {
+        throw ("The remembered custom candidate UI cannot be installed. " +
+            "The published installer no longer carries the unsigned in-process " +
+            "DLL; the candidate window now runs out of process instead. Either " +
+            "build the overlay from a source tree that still has " +
+            "native_ui\bin, or run this installer with -DisableUnsignedNativeUi " +
+            "to return to the signed PIME binaries. Unrelated PIME input-method " +
+            "modules also block it.")
+    }
+
+    if ((Test-Path -LiteralPath $launcher) -and -not $pimeWasQuitForTransaction) {
         Start-Process -FilePath $launcher -ArgumentList "/quit" -Wait
+        $pimeWasQuitForTransaction = $true
     }
 
     # The out-of-process candidate window lives inside the module directory and
@@ -156,16 +193,14 @@ try {
     # directory. It is disposable and the input method relaunches it on demand.
     Stop-SmartPriorityCandidateUiAndWait
 
-    $targetParent = Join-Path $resolvedRoot "python\input_methods"
-    $targetModule = Join-Path $targetParent $moduleName
-    $expectedTarget = [IO.Path]::GetFullPath((Join-Path $resolvedRoot "python\input_methods\$moduleName"))
-    if ([IO.Path]::GetFullPath($targetModule) -ne $expectedTarget) {
-        throw "Refusing to write to an unexpected module path."
-    }
-    Remove-DirectoryWithRetry -Path $targetModule
-    New-Item -ItemType Directory -Path $targetModule -Force | Out-Null
-    Get-ChildItem -LiteralPath $overlayModule -Force |
-        Copy-Item -Destination $targetModule -Recurse -Force
+    $embeddedPython = Join-Path $resolvedRoot "python\python3\python.exe"
+    $modulePython = if (Test-Path -LiteralPath $embeddedPython) { $embeddedPython } else { $null }
+    Install-SmartPriorityModuleTransaction `
+        -SourceDirectory $overlayModule `
+        -TargetDirectory $targetModule `
+        -TransactionParent (Join-Path $resolvedRoot "python") `
+        -PythonExecutable $modulePython `
+        -LockAlreadyHeld
 
     # 捷徑一律放「所有使用者」的位置，不是目前使用者的。
     #
@@ -253,54 +288,16 @@ try {
         }
     }
 
-    $embeddedPython = Join-Path $resolvedRoot "python\python3\python.exe"
-    if (Test-Path -LiteralPath $embeddedPython) {
-        & $embeddedPython -m compileall -q $targetModule
-        if ($LASTEXITCODE -ne 0) { throw "The module compile check failed." }
-    }
-
     # A fresh installation keeps PIME's signed DLL. Once a user explicitly
     # enables the custom UI, remember that choice across source, EXE, and AI-
     # assisted updates so a routine Python-layer update cannot silently revert
     # the appearance. The signed UI remains explicitly recoverable.
-    $useUnsignedNativeUi = Resolve-SmartPriorityNativeUiPreference `
-        -PreferencePath $nativePreferencePath `
-        -PimeRoot $resolvedRoot `
-        -StateRoot $nativeStateRoot `
-        -EnableUnsignedNativeUi:$EnableUnsignedNativeUi `
-        -DisableUnsignedNativeUi:$DisableUnsignedNativeUi
     if (-not $useUnsignedNativeUi) {
         Restore-OriginalPimeTextService -PimeRoot $resolvedRoot -StateRoot $nativeStateRoot
     }
 
-    # Apply the optional native candidate window only when explicitly enabled
-    # and when this PIME installation contains no unrelated input methods.
-    # Preserve the original DLLs so a safe reinstall/uninstall can restore them.
-    $pythonMethods = Join-Path $resolvedRoot "python\input_methods"
-    $nodeMethods = Join-Path $resolvedRoot "node\input_methods"
-    $otherPythonModules = @(
-        Get-ChildItem -LiteralPath $pythonMethods -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notin @($moduleName, "__pycache__") }
-    )
-    $otherNodeModules = @(
-        Get-ChildItem -LiteralPath $nodeMethods -Directory -ErrorAction SilentlyContinue
-    )
-    $nativeUiPayload = Join-Path $PayloadRoot "overlay\native_ui\bin"
-    $canInstallNativeUi = (
-        $useUnsignedNativeUi -and
-        $otherPythonModules.Count -eq 0 -and $otherNodeModules.Count -eq 0 -and
-        (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x86\PIMETextService.dll")) -and
-        (Test-Path -LiteralPath (Join-Path $nativeUiPayload "x64\PIMETextService.dll"))
-    )
-    if ($useUnsignedNativeUi -and -not $canInstallNativeUi) {
-        throw ("The remembered custom candidate UI cannot be installed. " +
-            "The published installer no longer carries the unsigned in-process " +
-            "DLL; the candidate window now runs out of process instead. Either " +
-            "build the overlay from a source tree that still has " +
-            "native_ui\bin, or run this installer with -DisableUnsignedNativeUi " +
-            "to return to the signed PIME binaries. Unrelated PIME input-method " +
-            "modules also block it.")
-    }
+    # Apply the already-preflighted optional native candidate window only when
+    # explicitly enabled and this PIME installation is otherwise eligible.
     if ($canInstallNativeUi) {
         # An earlier rollback may still hold a reboot-time signed restore in
         # the queue; cancel it so this explicit enable survives the restart.
@@ -451,6 +448,7 @@ public static class SmartPriorityNativeMethods {
     # accidentally leaving the launcher elevated.
     if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
+        $pimeWasQuitForTransaction = $false
     }
     # The candidate-window helper is deliberately NOT started here. This script
     # runs elevated, so anything it launches inherits that -- an elevated tray
@@ -473,5 +471,24 @@ catch {
     throw
 }
 finally {
-    Stop-Transcript | Out-Null
+    try {
+        if ($pimeWasQuitForTransaction -and $launcher -and (Test-Path -LiteralPath $launcher)) {
+            try {
+                Start-Process -FilePath "explorer.exe" -ArgumentList ('"' + $launcher + '"')
+            }
+            catch {
+                Write-Output "無法在交易結束後重新啟動 PIME：$($_.Exception.Message)"
+            }
+        }
+    }
+    finally {
+        try {
+            if ($null -ne $moduleTransactionMutex) {
+                Exit-SmartPriorityModuleTransactionLock -Mutex $moduleTransactionMutex
+            }
+        }
+        finally {
+            Stop-Transcript | Out-Null
+        }
+    }
 }

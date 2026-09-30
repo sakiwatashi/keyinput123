@@ -60,7 +60,62 @@ try {
     }
     if (-not $conflictRejected) { throw "Conflicting UI switches were accepted." }
 
-    Write-Output "PASS: native UI preference is persistent and explicitly reversible"
+    $pythonMethods = Join-Path $pimeRoot "python\input_methods"
+    $chewingModule = Join-Path $pythonMethods "chewing"
+    $projectModule = Join-Path $pythonMethods "pinned_bopomofo"
+    $nativePayload = Join-Path $temporaryRoot "native-ui-payload"
+    foreach ($directory in @(
+        $chewingModule,
+        $projectModule,
+        (Join-Path $nativePayload "x86"),
+        (Join-Path $nativePayload "x64")
+    )) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    Set-Content -LiteralPath (Join-Path $nativePayload "x86\PIMETextService.dll") -Value "x86" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $nativePayload "x64\PIMETextService.dll") -Value "x64" -Encoding ASCII
+
+    $freshPimeEligible = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $pimeRoot -NativeUiPayload $nativePayload -Requested $true `
+        -PythonModulesRemovedByInstaller @("chewing")
+    if (-not $freshPimeEligible) {
+        throw "The bundled New Chewing module must not block custom UI when this installer removes it."
+    }
+    $existingChewingBlocked = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $pimeRoot -NativeUiPayload $nativePayload -Requested $true
+    if ($existingChewingBlocked) {
+        throw "An unrelated module in an existing PIME installation must block the custom UI."
+    }
+
+    $unrelatedPythonModule = Join-Path $pythonMethods "unrelated"
+    New-Item -ItemType Directory -Path $unrelatedPythonModule -Force | Out-Null
+    $unrelatedPythonBlocked = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $pimeRoot -NativeUiPayload $nativePayload -Requested $true `
+        -PythonModulesRemovedByInstaller @("chewing")
+    if ($unrelatedPythonBlocked) {
+        throw "An unrelated Python input method did not block the custom UI."
+    }
+    Remove-Item -LiteralPath $unrelatedPythonModule -Recurse -Force
+
+    $unrelatedNodeModule = Join-Path $pimeRoot "node\input_methods\unrelated"
+    New-Item -ItemType Directory -Path $unrelatedNodeModule -Force | Out-Null
+    $unrelatedNodeBlocked = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $pimeRoot -NativeUiPayload $nativePayload -Requested $true `
+        -PythonModulesRemovedByInstaller @("chewing")
+    if ($unrelatedNodeBlocked) {
+        throw "An unrelated Node input method did not block the custom UI."
+    }
+    Remove-Item -LiteralPath (Split-Path -Parent $unrelatedNodeModule) -Recurse -Force
+
+    Remove-Item -LiteralPath (Join-Path $nativePayload "x64\PIMETextService.dll") -Force
+    $missingPayloadBlocked = Test-SmartPriorityNativeUiEligibility `
+        -PimeRoot $pimeRoot -NativeUiPayload $nativePayload -Requested $true `
+        -PythonModulesRemovedByInstaller @("chewing")
+    if ($missingPayloadBlocked) {
+        throw "The custom UI was considered eligible without both architecture DLLs."
+    }
+
+    Write-Output "PASS: native UI preference persists, rolls back explicitly, and checks install eligibility"
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {

@@ -77,12 +77,13 @@ Section "安裝智慧優先注音" SEC_MAIN
     ; 所有使用者：這是全機器安裝，而且提權者未必是使用者本人。
     SetShellVarContext all
     SetOutPath "$INSTDIR"
-    ; install.ps1 and uninstall.ps1 dot-source the two helpers below. A helper
+    ; install.ps1 and uninstall.ps1 dot-source the helpers below. A helper
     ; that is missing from this list aborts the script before it reaches
     ; Start-Transcript, so the failure never appears in install.log.
     File "install.ps1"
     File "native_ui_preference.ps1"
     File "restore_signed_text_service.ps1"
+    File "module_transaction.ps1"
     File "uninstall.ps1"
     File "..\release-staging\THIRD_PARTY_NOTICES.txt"
     File "..\release-staging\PIME-LICENSE.txt"
