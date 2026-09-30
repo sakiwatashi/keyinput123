@@ -240,8 +240,9 @@ Win+Space 清單裡、也無法使用；最後由使用者再安裝一次才恢�
   overlay 建置、安裝、解除安裝都會先停止它，不要拿掉。
 - **EXE 與原始碼安裝在同一個位置。** 輸入法必須位於 PIME 底下才會被載入，所以電腦上
   只有一份；解除安裝 EXE 會移除那唯一一份，包含從原始碼安裝的版本，個人資料不受
-  影響。`install.ps1` 不會更新 Windows「應用程式」清單裡的版本號（只有 NSIS 安裝檔
-  會寫），所以清單可能顯示舊版號。
+  影響。如果機器上有 EXE 留下的「應用程式」紀錄，`install.ps1` 會一併更新
+  它的版本號與它執行的解除安裝腳本（`tools/sync_uninstall_entry.ps1`；NSIS 寫在
+  `WOW6432Node`，兩個登錄檢視都要找）。純原始碼安裝不會建立紀錄。
 - **Python 讀 PowerShell 寫的 JSON 要用 `utf-8-sig`。** Windows PowerShell 寫檔會帶
   BOM，用純 `utf-8` 讀會失敗並被靜默吞掉，偏好開關就永遠停在預設值。
 - **Bash heredoc 會吃掉反斜線。** 用 heredoc 餵腳本寫檔時，Windows 路徑裡的 `\t`、`\f`、

@@ -87,6 +87,33 @@ try {
     & $formalInstaller -PayloadRoot $resolvedStaging `
         -EnableUnsignedNativeUi:$EnableUnsignedNativeUi `
         -DisableUnsignedNativeUi:$DisableUnsignedNativeUi
+
+    # Keep the Windows Apps list in step with what was just installed. Only the
+    # NSIS installer writes that entry, so after a source update it kept showing
+    # the last EXE's version. See tools/sync_uninstall_entry.ps1 for why the
+    # uninstall scripts are refreshed first and why both registry views are
+    # searched.
+    . (Join-Path (Join-Path $projectRoot "tools") "sync_uninstall_entry.ps1")
+    $imeJson = Join-Path (Join-Path $projectRoot "pime_module") "ime.json"
+    $version = (Get-Content -LiteralPath $imeJson -Raw | ConvertFrom-Json).version
+    $installerRoot = Join-Path $projectRoot "installer"
+    $uninstallKey = "Microsoft\Windows\CurrentVersion\Uninstall\SmartPriorityBopomofo"
+    $sync = Sync-UninstallEntry -Version $version -RegistryPaths @(
+        ("HKLM:\SOFTWARE\WOW6432Node\" + $uninstallKey),
+        ("HKLM:\SOFTWARE\" + $uninstallKey)
+    ) -PayloadFiles @(
+        (Join-Path $installerRoot "install.ps1"),
+        (Join-Path $installerRoot "native_ui_preference.ps1"),
+        (Join-Path $installerRoot "restore_signed_text_service.ps1"),
+        (Join-Path $installerRoot "uninstall.ps1"),
+        (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt")
+    )
+    foreach ($key in $sync.Updated) {
+        Write-Output "Updated the Apps list entry to $version ($key)."
+    }
+    foreach ($note in $sync.Skipped) {
+        Write-Output "Left an Apps list entry unchanged: $note"
+    }
 }
 finally {
     Set-Location -LiteralPath $env:TEMP
