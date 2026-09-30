@@ -48,6 +48,13 @@
         $phoneticToggle.AutoSize = $true
         $phoneticToggle.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
 
+        # 自動完成：打過的句子打到一半時提示後半段，按 Tab 接上。預設開啟——
+        # 它只提示，不按 Tab 什麼都不會改。見 completion_store.py。
+        $autocompleteToggle = New-Object System.Windows.Forms.CheckBox
+        $autocompleteToggle.Text = "自動完成：打過的句子打到一半時提示後半段，按 Tab 接上；預設開啟"
+        $autocompleteToggle.AutoSize = $true
+        $autocompleteToggle.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
+
         $note = New-Object System.Windows.Forms.Label
         $note.AutoSize = $true
         $note.MaximumSize = New-Object System.Drawing.Size(860, 0)
@@ -91,6 +98,7 @@
         # 兩個偏好的檔案格式一樣，但預設值相反，所以預設值要傳進來：
         #   候選視窗    預設開啟（candidate_ui_client.py）
         #   讀音改字    預設關閉（phonetic_preference.py）
+        #   自動完成    預設開啟（completion_store.py）
         # 這兩個預設值必須與 Python 那一側一致，不然控制台顯示的狀態會騙人。
         $getEnabled = {
             param([string]$path, [bool]$fallback)
@@ -171,6 +179,15 @@
                 "讀音相近時自動改字" $phoneticSource
             $phoneticToggle.Checked = $phonetic
 
+            $autocomplete = & $getEnabled $Context.Autocomplete $true
+            $autocompleteSource = if (
+                -not [string]::IsNullOrWhiteSpace($Context.Autocomplete) -and
+                (Test-Path -LiteralPath $Context.Autocomplete)
+            ) { $Context.Autocomplete } else { "偏好檔不存在（預設開啟）" }
+            & $addRow $(if ($autocomplete) { "啟用" } else { "關閉" }) `
+                "自動完成（Tab）" $autocompleteSource
+            $autocompleteToggle.Checked = $autocomplete
+
             & $addRow $(if (Test-Path -LiteralPath $Context.StateRoot) { "存在" } else { "尚未建立" }) `
                 "個人資料夾" $Context.StateRoot
         }.GetNewClosure()
@@ -192,6 +209,15 @@
                         enabled = [bool]$phoneticToggle.Checked; version = 1
                     } | ConvertTo-Json
                     [IO.File]::WriteAllText($Context.PhoneticFix, $phoneticJson,
+                        (New-Object Text.UTF8Encoding($false)))
+                }
+
+                # 殼跟模組可能不同步：舊殼沒有這個欄位時不寫，而不是寫到 $null 路徑上。
+                if (-not [string]::IsNullOrWhiteSpace($Context.Autocomplete)) {
+                    $autocompleteJson = @{
+                        enabled = [bool]$autocompleteToggle.Checked; version = 1
+                    } | ConvertTo-Json
+                    [IO.File]::WriteAllText($Context.Autocomplete, $autocompleteJson,
                         (New-Object Text.UTF8Encoding($false)))
                 }
 
@@ -256,6 +282,7 @@
         $bottom.WrapContents = $false
         [void]$bottom.Controls.Add($toggle)
         [void]$bottom.Controls.Add($phoneticToggle)
+        [void]$bottom.Controls.Add($autocompleteToggle)
         [void]$bottom.Controls.Add($note)
 
         $panel.Controls.Add($grid, 0, 0)

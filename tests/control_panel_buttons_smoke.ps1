@@ -77,6 +77,7 @@ try {
         LauncherPath = Join-Path $sandbox "no-such-launcher.exe"
         CandidateUi  = Join-Path $sandbox "candidate-ui.json"
         PhoneticFix  = Join-Path $sandbox "phonetic-correction.json"
+        Autocomplete = Join-Path $sandbox "autocomplete.json"
         PhrasesPath  = Join-Path $sandbox "phrases.json"
         PinsPath     = Join-Path $sandbox "pins.json"
         RestartPime  = ${function:Restart-Pime}
@@ -251,6 +252,24 @@ try {
 
     if ($clicked -lt 8) {
         $failures.Add("只按到 $clicked 個按鈕，控制項走訪可能沒有深入分頁")
+    }
+
+    # 「套用並重啟 PIME」要真的把自動完成的開關寫下來。沒有偏好檔時勾選框顯示
+    # 預設（開啟），按下套用就該寫出 enabled=true，而且不能帶 BOM——輸入法那側
+    # 雖然用 utf-8-sig 讀得懂，其他 JSON 一律不准有 BOM（json_encoding_smoke）。
+    $autocompleteFile = Join-Path $sandbox "autocomplete.json"
+    if (-not (Test-Path -LiteralPath $autocompleteFile)) {
+        $failures.Add("按了套用，卻沒有寫出 autocomplete.json")
+    }
+    else {
+        $bytes = [IO.File]::ReadAllBytes($autocompleteFile)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $failures.Add("autocomplete.json 帶了 BOM")
+        }
+        $written = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+        if ($written.enabled -ne $true) {
+            $failures.Add("沒有偏好檔時自動完成應該顯示為開啟並照樣寫下，實際寫的是：$($written.enabled)")
+        }
     }
 }
 finally {

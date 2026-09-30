@@ -25,6 +25,7 @@ from pinned_bopomofo.pinned_bopomofo_ime import (
     PinnedBopomofoTextService,
     SHIFT_TOGGLE_GUID,
 )
+from pinned_bopomofo.bopomofo_core.completion_store import CompletionStore
 from pinned_bopomofo.bopomofo_core.context_store import ContextStore
 from pinned_bopomofo.bopomofo_core.word_usage import WordUsageStore
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
@@ -2770,6 +2771,101 @@ def main() -> None:
         typo_reply = special_key(typo, 0x0D, sequence)
         assert typo_reply["commitString"] == "\u4e0d\u540c\u51e1\u97ff", (
             "錯別字修正被關掉了", ascii(typo_reply["commitString"]))
+
+        # 自動完成：打過三次的「謝謝您的協助」，打到「謝謝」時提示後半段，Tab 接上。
+        xiexie = ["ㄒㄧㄝˋ", "ㄒㄧㄝˋ"]
+        rest = ["ㄋㄧㄣˊ", "ㄉㄜ˙", "ㄒㄧㄝˊ", "ㄓㄨˋ"]
+        completions = CompletionStore(os.path.join(appdata, "smoke-completions.json"))
+        for _ in range(3):
+            completions.record(xiexie + rest, "謝謝您的協助")
+
+        def composing_xiexie(seq, store=completions):
+            service = PinnedBopomofoTextService(DummyClient())
+            service.completion_store = store
+            seq = type_readings(service, xiexie, seq)
+            force_composition_text(service, "謝謝")
+            return service, seq
+
+        hinted, sequence = composing_xiexie(sequence)
+        assert hinted.completion == ("您的協助", rest), (
+            "打到「謝謝」沒有提示", hinted.completion)
+        reply = filter_key(hinted, "filterKeyDown", 0x09, sequence)
+        assert reply["return"] is True, "有提示時 Tab 沒有被認領，會跑去應用程式"
+        reply = filter_key(hinted, "filterKeyDown", 0x09, sequence + 1, shift=True)
+        assert reply["return"] is False, "Shift+Tab 必須交給應用程式"
+        reply = special_key(hinted, 0x09, sequence + 2)
+        sequence += 3
+        assert not reply.get("commitString"), (
+            "Tab 應該接進組字區，不是直接送出", reply.get("commitString"))
+        assert hinted.compositionString == "謝謝您的協助", hinted.compositionString
+        assert [s.reading for s in hinted.segments] == xiexie + rest, (
+            "接上的字沒有帶讀音，之後就不能再選字")
+        assert all(s.locked for s in hinted.segments[2:]), (
+            "接上的字沒鎖住，詞網格下一次重排就可能改掉它")
+        assert not any(s.user_corrected for s in hinted.segments[2:]), (
+            "接受提示不是修正，不該讓送出時學進 phrases.json")
+        assert hinted.completion is None
+        reply = special_key(hinted, 0x0D, sequence)
+        sequence += 1
+        assert reply["commitString"] == "謝謝您的協助", reply.get("commitString")
+
+        # 沒有提示時 Tab 不認領：表單換欄、程式碼縮排都靠它。
+        plain, sequence = composing_xiexie(
+            sequence, CompletionStore(os.path.join(appdata, "smoke-empty.json"))
+        )
+        assert plain.completion is None
+        reply = filter_key(plain, "filterKeyDown", 0x09, sequence)
+        sequence += 1
+        assert reply["return"] is False, "沒有提示時 Tab 被吃掉了"
+
+        # Esc 先收掉提示，打了一半的句子不能跟著不見；同一個提示不再冒出來。
+        dismissed, sequence = composing_xiexie(sequence)
+        assert dismissed.completion is not None
+        reply = special_key(dismissed, 0x1B, sequence)
+        sequence += 1
+        assert reply.get("hideMessage") is True, "提示框沒有收起來"
+        assert dismissed.compositionString == "謝謝", (
+            "Esc 把整段組字區清掉了", dismissed.compositionString)
+        assert dismissed.completion is None, "收掉的提示又出現了"
+        special_key(dismissed, 0x1B, sequence)
+        sequence += 1
+        assert dismissed.compositionString == "", "沒有提示時 Esc 應該照舊清掉組字區"
+
+        # 提示框看得見，Tab 才會接：提示出現的那一次按鍵回覆必須帶著 showMessage。
+        # 用真的按鍵打出「謝謝」，不靠 force_composition_text。
+        shown = PinnedBopomofoTextService(DummyClient())
+        shown.completion_store = completions
+        reply = None
+        for reading in xiexie:
+            for key in keys_for_reading(reading):
+                reply = press(shown, key, sequence)
+                sequence += 1
+        assert shown.compositionString == "謝謝", (
+            "這台機器的詞庫把 ㄒㄧㄝˋ ㄒㄧㄝˋ 打成別的字，測試前提不成立",
+            shown.compositionString)
+        assert reply.get("showMessage", {}).get("message") == "Tab ▸ 您的協助", (
+            "提示出現了但沒有叫 PIME 顯示", reply.get("showMessage"))
+
+        # 關掉開關就完全沒有提示。
+        off, sequence = composing_xiexie(sequence)
+        assert off.completion is not None
+        off.autocomplete = False
+        off._render_buffer()
+        assert off.completion is None, "關掉自動完成之後還在提示"
+
+        # 送出時要記進自動完成。
+        learned = PinnedBopomofoTextService(DummyClient())
+        learned.completion_store = CompletionStore(
+            os.path.join(appdata, "smoke-learned.json")
+        )
+        sequence = type_readings(learned, xiexie + rest, sequence)
+        force_composition_text(learned, "謝謝您的協助")
+        special_key(learned, 0x0D, sequence)
+        sequence += 1
+        assert len(learned.completion_store) == 1, "送出的句子沒有記進自動完成"
+        for _ in range(2):
+            learned.completion_store.record(xiexie + rest, "謝謝您的協助")
+        assert learned.completion_store.suggest(xiexie, ["謝", "謝"]) is not None
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

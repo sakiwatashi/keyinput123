@@ -14,6 +14,7 @@ from textService import TextService
 from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
+from .bopomofo_core.completion_store import CompletionStore, autocomplete_enabled
 from .bopomofo_core.context_store import ContextStore
 from .bopomofo_core.feedback_store import FeedbackStore
 from .bopomofo_core.hidden_characters import (
@@ -116,6 +117,10 @@ WORD_USE_BONUS = 2000
 WORD_USE_CONFIDENCE = 3
 CANDIDATE_PAGE_SIZE = 10
 MAX_PHRASE_CHOICES = 12
+# 自動完成的提示框顯示多久（秒）。提示還在時 Tab 就會接上，所以提示框絕不能比
+# 提示本身先消失——看不見的提示被 Tab 接上，等於暗中改字。實際上它會在組字區
+# 變動、送出或按 Esc 時被明確收掉，這個時間只是保底。
+COMPLETION_MESSAGE_SECONDS = 600
 CANDIDATES_PER_ROW = 2
 CANDIDATE_SELECTION_LABELS = "1234567890"
 NUMPAD_TEXT = {
@@ -190,6 +195,16 @@ class PinnedBopomofoTextService(TextService):
         self.word_usage = WordUsageStore(
             os.path.join(appdata, "PinnedBopomofo", "word_usage.json")
         )
+        # 自動完成：你打過的句子，打到一半時提示後半段，按 Tab 接上。只提示、
+        # 不改排序，見 completion_store.py。開關跟讀音改字一樣只在啟動時讀一次。
+        self.completion_store = CompletionStore(
+            os.path.join(appdata, "PinnedBopomofo", "completions.json")
+        )
+        self.autocomplete = autocomplete_enabled()
+        # 目前畫面上的提示 (文字, 讀音)；None 表示沒有提示，Tab 照常交給應用程式。
+        self.completion: tuple[str, list[str]] | None = None
+        # 按 Esc 收掉的那一個提示。同一段組字區不要再冒出同一個提示。
+        self.completion_dismissed: tuple | None = None
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         # 讀一次就好。打字路徑上碰硬碟會卡住宿主程式的輸入執行緒。
@@ -374,6 +389,7 @@ class PinnedBopomofoTextService(TextService):
         try:
             self.usage_store.flush()
             self.word_usage.flush()
+            self.completion_store.flush()
         except Exception:
             pass
 
@@ -434,6 +450,10 @@ class PinnedBopomofoTextService(TextService):
             return False
         if self._numpad_text(keyEvent) is not None:
             return True
+        # 只在有提示時才認領 Tab。沒有提示時 Tab 是應用程式的（表單換欄、程式碼
+        # 縮排），認領了就會把它吃掉。Shift+Tab 永遠交給應用程式。
+        if self._accepts_completion(keyEvent):
+            return True
         if self.showCandidates and self._candidate_number(keyEvent) is not None:
             return True
         if self._temporary_english_letter(keyEvent) is not None:
@@ -483,6 +503,9 @@ class PinnedBopomofoTextService(TextService):
         numpad_text = self._numpad_text(keyEvent)
         if numpad_text is not None:
             self._emit_direct_text(numpad_text)
+            return True
+        if self._accepts_completion(keyEvent):
+            self._accept_completion()
             return True
         if (
             self.showCandidates
@@ -609,6 +632,11 @@ class PinnedBopomofoTextService(TextService):
         if keyEvent.keyCode == VK_ESCAPE:
             if self.showCandidates:
                 self.setShowCandidates(False)
+                self._render_buffer()
+            elif self.completion is not None:
+                # 有提示時，Esc 先收掉提示，不要順手清掉整段組字區。想拒絕提示
+                # 的人按 Esc 是本能，那一下不該賠上打了一半的句子。
+                self.completion_dismissed = self._completion_key(self.completion)
                 self._render_buffer()
             else:
                 self._clear_all()
@@ -1909,6 +1937,7 @@ class PinnedBopomofoTextService(TextService):
             self.setCandidateList([])
             self.setShowCandidates(False)
             self.setCandidateCursor(0)
+        self._update_completion()
 
     def _commit_buffer(self, suffix: str = "") -> None:
         # Space, Enter, punctuation, Shift, deactivation, and direct English
@@ -1959,12 +1988,112 @@ class PinnedBopomofoTextService(TextService):
                     span_start, span_end, text[span_start:span_end]
                 )
         self._record_word_usage()
+        self._record_completions()
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
         self.setCompositionCursor(0)
         self.setCandidateList([])
         self.setShowCandidates(False)
+
+    def _completion_context(self) -> tuple[list[str], list[str]] | None:
+        """組字區結尾那一段可以拿來當線索的中文：(讀音, 字)。
+
+        只有游標在最後、沒有打到一半的注音、候選視窗沒開的時候才有。游標在句中
+        時接上去的字會落在哪裡說不清楚；候選視窗開著時 Tab 旁邊還有另一個選擇
+        要做，兩個框疊在一起只會讓人不知道 Tab 會做哪一件。
+        """
+        if not self.segments or self.session.preedit or self.showCandidates:
+            return None
+        if self.replacement_index is not None:
+            return None
+        if self.focus_index is not None and self.focus_index != len(self.segments) - 1:
+            return None
+        runs = self._typable_runs()
+        if not runs or runs[-1][1] != len(self.segments):
+            return None
+        start, end = runs[-1]
+        tail = self.segments[start:end]
+        # 原始注音（ㄅ）也算可打的讀音，但它不是中文字，拿來當線索沒有意義。
+        if any(
+            len(segment.text) != 1 or segment.text in BOPOMOFO_TEXT for segment in tail
+        ):
+            return None
+        return ([segment.reading for segment in tail], [segment.text for segment in tail])
+
+    def _completion_key(self, completion: tuple[str, list[str]]) -> tuple:
+        return (
+            tuple(segment.text for segment in self.segments),
+            completion[0],
+        )
+
+    def _update_completion(self) -> None:
+        """每次重繪之後重算提示，有變化才告訴 PIME 顯示或收起提示框。"""
+        suggestion = None
+        if self.autocomplete and not self.english_mode:
+            context = self._completion_context()
+            if context is not None:
+                try:
+                    suggestion = self.completion_store.suggest(*context)
+                except Exception:
+                    # 提示只是附加的；算壞了就當沒有，絕不能擋住打字。
+                    suggestion = None
+            if suggestion is not None and (
+                any(HIDDEN_CHARACTERS.is_hidden(c) for c in suggestion[0])
+                or self._completion_key(suggestion) == self.completion_dismissed
+            ):
+                suggestion = None
+        if suggestion == self.completion:
+            return
+        self.completion = suggestion
+        if suggestion is None:
+            self.hideMessage()
+        else:
+            self.showMessage(f"Tab ▸ {suggestion[0]}", COMPLETION_MESSAGE_SECONDS)
+
+    def _accepts_completion(self, keyEvent) -> bool:
+        return (
+            self.completion is not None
+            and keyEvent.keyCode == VK_TAB
+            and not self._shift_held(keyEvent)
+            and not keyEvent.isKeyDown(VK_CONTROL)
+        )
+
+    def _accept_completion(self) -> None:
+        """把提示的字接在組字區後面。接上去的字鎖住，但還沒送出，照常可以改。
+
+        鎖住是因為這是使用者按 Tab 明確選的；不鎖的話詞網格下一次重排就可能把
+        它改成別的字，Tab 接上的跟畫面上的就對不起來。
+        不標成 user_corrected：接受提示不是修正，不該讓送出時學進 phrases.json。
+        """
+        text, readings = self.completion
+        for character, reading in zip(text, readings):
+            candidates = list(
+                dict.fromkeys([character] + self.session.candidates_for_reading(reading))
+            )[: self.session.max_candidates]
+            self.segments.append(
+                BufferedSyllable(reading=reading, candidates=candidates, locked=True)
+            )
+        self.focus_index = len(self.segments) - 1
+        self._apply_phrase_ranking()
+        self._render_buffer()
+
+    def _record_completions(self) -> None:
+        """送出時把每一段連續的中文記給自動完成。統計絕不能擋住送字。"""
+        try:
+            for start, end in self._typable_runs():
+                run = self.segments[start:end]
+                if any(
+                    len(segment.text) != 1 or segment.text in BOPOMOFO_TEXT
+                    for segment in run
+                ):
+                    continue
+                self.completion_store.record(
+                    [segment.reading for segment in run],
+                    "".join(segment.text for segment in run),
+                )
+        except Exception:
+            pass
 
     def _clear_all(self) -> None:
         self.session.clear()
@@ -1974,9 +2103,11 @@ class PinnedBopomofoTextService(TextService):
         self.reading_open = False
         self.candidate_page = 0
         self.candidate_choices = []
+        self.completion_dismissed = None
         self.setCandidateList([])
         self.setShowCandidates(False)
         self.setCandidateCursor(0)
+        self._update_completion()
 
     def _bell(self, reason: str) -> None:
         # SystemAsterisk is the gentler Windows information sound.  Do not

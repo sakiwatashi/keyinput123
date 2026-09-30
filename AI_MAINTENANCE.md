@@ -28,6 +28,8 @@
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tools/build_reading_phrase_lexicon.py`：合併固定版本 McBopomofo、libchewing-data 與 Rime Essay 權重，重建 `reading_phrases.json.gz`；生成檔不應手工修改。
+- `bopomofo_core/completion_store.py`：自動完成。記錄送出的每一段中文與讀音
+  （`completions.json`），打到一半時提示後半段；開關 `autocomplete.json`，預設開啟。
 - `bopomofo_core/candidate_ui_client.py`：把候選清單鏡像給行程外候選視窗。射後
   不理，絕不可阻塞 —— 出貨版 DLL 呼叫 `TransactNamedPipe` 沒有客戶端逾時，且
   PIME 的 `server.py` 是單執行緒服務所有應用程式，一次阻塞會凍結全系統打字。
@@ -389,6 +391,18 @@ it and the local reads as `$null`. Static check lives in
   Shift toggle. Respect the TSF keyboard-open state supplied by the host;
   never reopen a compartment after an app closes it. This prevents games and
   secure/custom controls from entering an open/close feedback loop.
+- Autocomplete only **suggests**. `completion_store.py` never feeds ranking,
+  phrases, pins, contexts or word usage; the hint is shown with PIME's
+  `showMessage` and nothing changes until the user presses Tab. Claim Tab only
+  while a hint is on screen -- without one, Tab belongs to the application
+  (form fields, code indentation) -- and never claim Shift+Tab or Ctrl+Tab.
+  The message must never disappear while the hint is still live: an invisible
+  hint accepted by Tab is a silent rewrite. Accepted characters are appended to
+  the editable composition, not committed; they are `locked` so the lattice
+  cannot rewrite what the user just accepted, and **not** `user_corrected`,
+  because accepting a suggestion is not a correction and must not teach
+  `phrases.json` at commit. While a hint is showing, Esc dismisses the hint
+  only; it must not throw away the half-typed sentence.
 - Numpad 0-9, decimal, divide, multiply, subtract, and add always emit their
   literal ASCII characters and never Bopomofo or candidate numbers.
   Shift+A-Z, shifted ASCII symbols, and Ctrl punctuation replace only an

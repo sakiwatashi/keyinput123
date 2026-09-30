@@ -97,6 +97,7 @@ function New-SmartPriorityContext {
         LauncherPath  = if ($pimeRoot) { Join-Path $pimeRoot "PIMELauncher.exe" } else { $null }
         CandidateUi   = Join-Path $stateRoot "candidate-ui.json"
         PhoneticFix   = Join-Path $stateRoot "phonetic-correction.json"
+        Autocomplete  = Join-Path $stateRoot "autocomplete.json"
         PhrasesPath   = Join-Path $stateRoot "phrases.json"
         PinsPath      = Join-Path $stateRoot "pins.json"
         RestartPime   = ${function:Restart-Pime}
