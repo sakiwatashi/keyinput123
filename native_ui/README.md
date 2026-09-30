@@ -6,7 +6,7 @@ There are two implementations of the Japanese-inspired candidate window here.
 - **`helper/` — out-of-process (preferred).** A standalone executable that
   draws the vertical-first grid in its own process and never loads into
   another application. Every process, games included, keeps only PIME's
-  original signed `PIMETextService.dll`. See `../OUT_OF_PROCESS_UI_DESIGN.md`.
+  original signed `PIMETextService.dll`. Its design and measurements are in the project's git history.
 - **`src/` — in-process (legacy, no longer published).** A rebuilt
   `PIMETextService.dll`. Because a TSF text service is loaded into every
   application that accepts text, this unsigned DLL also enters game processes.
