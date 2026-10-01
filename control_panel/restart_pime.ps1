@@ -18,9 +18,15 @@ function Restart-Pime {
         重啟 PIME，回傳 @{ Success = [bool]; Message = [string] }。
         呼叫端必須把 Message 顯示出來，不要自己編一句「已重啟」。
     #>
-    param([string]$LauncherPath)
+    param(
+        [string]$LauncherPath,
+        # PIME 停下之後、重新啟動之前要做的事。用來刪除輸入法會從記憶體寫回的
+        # 檔案：先刪再重啟的話，輸入法收工時可能把舊資料又寫回去，等於沒刪。
+        [scriptblock]$WhileStopped
+    )
 
     if (-not $LauncherPath -or -not (Test-Path -LiteralPath $LauncherPath)) {
+        if ($WhileStopped) { & $WhileStopped }
         return @{
             Success = $false
             Message = "找不到 PIMELauncher.exe，設定要等下次重新啟動 PIME 才會生效。"
@@ -38,6 +44,7 @@ function Restart-Pime {
     while ((Get-Date) -lt $deadline -and (Get-Process -Name PIMELauncher -ErrorAction Ignore)) {
         Start-Sleep -Milliseconds 200
     }
+    if ($WhileStopped) { & $WhileStopped }
 
     try {
         $process = Start-Process -FilePath $LauncherPath -PassThru -ErrorAction Stop

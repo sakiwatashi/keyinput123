@@ -254,6 +254,33 @@ try {
         $failures.Add("只按到 $clicked 個按鈕，控制項走訪可能沒有深入分頁")
     }
 
+    # 狀態分頁要看得到語言模型與自動完成紀錄。上面的沙箱沒有 ModuleRoot，模型那
+    # 一列根本不會出現，所以另外拿專案目錄當模組目錄建一次——它跟安裝後的模組目錄
+    # 一樣有 bopomofo_core\data\bigram_model.*。
+    $statusContext = $context.PSObject.Copy()
+    $statusContext.ModuleRoot = $root
+    Set-Content -LiteralPath (Join-Path $sandbox "completions.json") -Encoding Ascii -Value (
+        '{"version": 1, "entries": {"ab": {"r": ["x", "y"], "n": 3, "last": 1}, "cd": {"r": ["x", "y"], "n": 1, "last": 1}, "ef": {"r": ["x", "y"], "n": 2, "last": 1}}}')
+    $statusDefinition = & (Join-Path $moduleDirectory "10-status.ps1")
+    $statusControl = & $statusDefinition.Build $statusContext
+    try {
+        $statusGrid = $statusControl.Controls | Where-Object { $_ -is [System.Windows.Forms.DataGridView] } | Select-Object -First 1
+        $statusRows = @(foreach ($row in $statusGrid.Rows) {
+            [pscustomobject]@{ Item = [string]$row.Cells["item"].Value; State = [string]$row.Cells["state"].Value; Detail = [string]$row.Cells["detail"].Value }
+        })
+        $modelRow = $statusRows | Where-Object { $_.Item -like "雙詞語言模型*" } | Select-Object -First 1
+        if (-not $modelRow -or $modelRow.State -ne "存在") {
+            $failures.Add("狀態分頁沒有顯示語言模型存在：$($modelRow | Out-String)")
+        }
+        $completionRow = $statusRows | Where-Object { $_.Item -eq "自動完成紀錄" } | Select-Object -First 1
+        if (-not $completionRow -or $completionRow.Detail -notlike "3 段*") {
+            $failures.Add("狀態分頁沒有正確數出自動完成紀錄（應為 3 段；外層欄位剛好 2 個，別用 2 筆測）：$($completionRow | Out-String)")
+        }
+    }
+    finally {
+        $statusControl.Dispose()
+    }
+
     # 「套用並重啟 PIME」要真的把自動完成的開關寫下來。沒有偏好檔時勾選框顯示
     # 預設（開啟），按下套用就該寫出 enabled=true，而且不能帶 BOM——輸入法那側
     # 雖然用 utf-8-sig 讀得懂，其他 JSON 一律不准有 BOM（json_encoding_smoke）。

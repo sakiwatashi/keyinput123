@@ -39,6 +39,8 @@ USAGE_NAME = "usage.json"
 HIDDEN_NAME = "hidden-characters.json"
 CONTEXTS_NAME = "contexts.json"
 WORD_USAGE_NAME = "word_usage.json"
+PAIRS_NAME = "pairs.json"
+COMPLETIONS_NAME = "completions.json"
 SYNCED_FILES = (
     PHRASES_NAME,
     PINS_NAME,
@@ -46,6 +48,8 @@ SYNCED_FILES = (
     HIDDEN_NAME,
     CONTEXTS_NAME,
     WORD_USAGE_NAME,
+    PAIRS_NAME,
+    COMPLETIONS_NAME,
 )
 
 
@@ -295,6 +299,66 @@ def merge_word_usage(
     return merged
 
 
+def merge_pairs(
+    local: dict[str, Any],
+    remote: dict[str, Any],
+    report: MergeReport | None = None,
+) -> dict[str, int]:
+    """連字習慣：每一對取兩邊的較大值，跟 word_usage 同一個理由——同步會重複跑。"""
+    report = report or MergeReport()
+    merged: dict[str, int] = {}
+    for pair in set(local) | set(remote):
+        if not isinstance(pair, str) or len(pair) != 2:
+            continue
+        count = max(_int(local.get(pair)), _int(remote.get(pair)))
+        if count > 0:
+            merged[pair] = count
+    report.note_added(PAIRS_NAME, len(set(remote) - set(local)))
+    report.note_pushed(PAIRS_NAME, len(set(local) - set(remote)))
+    return merged
+
+
+def merge_completions(
+    local: dict[str, Any],
+    remote: dict[str, Any],
+    report: MergeReport | None = None,
+) -> dict[str, dict[str, Any]]:
+    """自動完成紀錄：次數取較大值，最後使用時間取較新的；讀音跟著較新的那一邊。
+
+    讀音跟字數對不上的條目丟掉——自動完成接上去的字要帶讀音才能再選字，壞條目
+    同步過去只會在另一台電腦上提示一段改不了的字。
+    """
+    report = report or MergeReport()
+
+    def valid(text: Any, entry: Any) -> bool:
+        return (
+            isinstance(text, str)
+            and isinstance(entry, dict)
+            and isinstance(entry.get("r"), list)
+            and len(entry["r"]) == len(text)
+            and _int(entry.get("n")) > 0
+        )
+
+    here = {t: e for t, e in local.items() if valid(t, e)}
+    there = {t: e for t, e in remote.items() if valid(t, e)}
+    merged: dict[str, dict[str, Any]] = {}
+    for text in set(here) | set(there):
+        a, b = here.get(text), there.get(text)
+        if a is None or b is None:
+            entry = dict(a or b)
+        else:
+            newer = b if _int(b.get("last")) > _int(a.get("last")) else a
+            entry = {
+                "r": list(newer["r"]),
+                "n": max(_int(a.get("n")), _int(b.get("n"))),
+                "last": max(_int(a.get("last")), _int(b.get("last"))),
+            }
+        merged[text] = {"r": list(entry["r"]), "n": _int(entry["n"]), "last": _int(entry.get("last"))}
+    report.note_added(COMPLETIONS_NAME, len(set(there) - set(here)))
+    report.note_pushed(COMPLETIONS_NAME, len(set(here) - set(there)))
+    return merged
+
+
 # ---- pins -------------------------------------------------------------------
 
 
@@ -391,6 +455,11 @@ def merge_hidden(
 # ---- whole-directory sync ---------------------------------------------------
 
 
+def _read_section(path: Path, name: str) -> dict[str, Any]:
+    section = load_json_object(path).get(name, {})
+    return section if isinstance(section, dict) else {}
+
+
 def _read_counts(path: Path) -> dict[str, Any]:
     raw = load_json_object(path)
     counts = raw.get("counts", raw)
@@ -447,6 +516,17 @@ def sync_directories(
         report,
     )
 
+    pairs = merge_pairs(
+        _read_section(state_root / PAIRS_NAME, "pairs"),
+        _read_section(sync_root / PAIRS_NAME, "pairs"),
+        report,
+    )
+    completions = merge_completions(
+        _read_section(state_root / COMPLETIONS_NAME, "entries"),
+        _read_section(sync_root / COMPLETIONS_NAME, "entries"),
+        report,
+    )
+
     if dry_run:
         return report
 
@@ -457,6 +537,8 @@ def sync_directories(
         HIDDEN_NAME: hidden,
         CONTEXTS_NAME: contexts,
         WORD_USAGE_NAME: {"version": 1, "counts": word_usage},
+        PAIRS_NAME: {"version": 1, "pairs": pairs},
+        COMPLETIONS_NAME: {"version": 1, "entries": completions},
     }
     for root in (state_root, sync_root):
         for name, value in payloads.items():

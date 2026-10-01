@@ -231,7 +231,8 @@ python tools\sync_user_data.py --folder D:\OneDrive\PinnedBopomofo --dry-run
 果跟一次相同，所以放進排程重複執行是安全的。
 
 同步的檔案是 `phrases.json`、`pins.json`、`usage.json`、`hidden-characters.json`、
-`contexts.json`、`word_usage.json`。
+`contexts.json`、`word_usage.json`、`pairs.json`（連字習慣）、`completions.json`（自動完成）。
+次數類的檔案（使用次數、連字習慣、自動完成）一律取兩邊的較大值，所以重複同步不會讓數字膨脹。
 `keyevent-trace.json` 與 `candidate-ui.json` 刻意排除：前者是可再生的診斷資料，
 後者描述的是這台機器（哪套反作弊、哪個螢幕）而不是使用者。
 

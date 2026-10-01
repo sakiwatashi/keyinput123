@@ -17,9 +17,13 @@ function Assert-True([bool]$condition, [string]$message) {
 }
 
 # 1. 啟動器路徑不存在。
-$missing = Restart-Pime -LauncherPath (Join-Path $env:TEMP "no-such-launcher.exe")
+$ran = @{ Count = 0 }
+$missing = Restart-Pime -LauncherPath (Join-Path $env:TEMP "no-such-launcher.exe") `
+    -WhileStopped { $ran.Count++ }.GetNewClosure()
 Assert-True (-not $missing.Success) "找不到啟動器時不該回報成功"
 Assert-True ([bool]$missing.Message) "失敗時必須有訊息"
+# 「清除自動完成紀錄」靠這個在 PIME 停下時刪檔；沒跑的話檔案根本沒被刪。
+Assert-True ($ran.Count -eq 1) "找不到啟動器時 -WhileStopped 也要執行一次，實際 $($ran.Count) 次"
 
 # 2. 啟動器存在，但一啟動就結束 —— 正是實際發生的情況。
 $compiler = Join-Path $env:WINDIR (Join-Path "Microsoft.NET" (Join-Path "Framework" (Join-Path "v4.0.30319" "csc.exe")))
@@ -30,7 +34,9 @@ if (Test-Path -LiteralPath $compiler) {
         Set-Content -LiteralPath $stub -Encoding UTF8
     try {
         & $compiler /nologo /target:exe /out:"$fake" "$stub" | Out-Null
-        $result = Restart-Pime -LauncherPath $fake
+        $stopped = @{ Count = 0 }
+        $result = Restart-Pime -LauncherPath $fake -WhileStopped { $stopped.Count++ }.GetNewClosure()
+        Assert-True ($stopped.Count -eq 1) "停下 PIME 之後 -WhileStopped 要執行一次，實際 $($stopped.Count) 次"
         Assert-True (-not $result.Success) `
             "啟動後立刻結束的啟動器被回報成功了：$($result.Message)"
         Assert-True ($result.Message -match "重新開機") `

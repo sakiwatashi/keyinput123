@@ -4,13 +4,17 @@ import unittest
 from pathlib import Path
 
 from bopomofo_core.sync import (
+    COMPLETIONS_NAME,
     CONTEXTS_NAME,
+    PAIRS_NAME,
     HIDDEN_NAME,
     PHRASES_NAME,
     PINS_NAME,
     USAGE_NAME,
     WORD_USAGE_NAME,
+    merge_completions,
     merge_contexts,
+    merge_pairs,
     merge_hidden,
     merge_phrases,
     merge_pins,
@@ -193,6 +197,42 @@ class MergeWordUsageTests(unittest.TestCase):
         self.assertEqual({"一步": 3}, merged["ㄧˉ ㄅㄨˋ"])
 
 
+class MergePairsTests(unittest.TestCase):
+    def test_takes_the_larger_count_and_keeps_both_sides(self) -> None:
+        merged = merge_pairs({"試了": 4, "在是": 2}, {"試了": 7, "一步": 1})
+        self.assertEqual({"試了": 7, "在是": 2, "一步": 1}, merged)
+
+    def test_merging_twice_changes_nothing(self) -> None:
+        remote = {"試了": 7}
+        once = merge_pairs({"試了": 4}, remote)
+        self.assertEqual(once, merge_pairs(once, remote))
+
+    def test_damaged_entries_are_dropped(self) -> None:
+        self.assertEqual({"試了": 1}, merge_pairs({"試了": 1, "太長的鍵": 5, "壞": "x"}, {}))
+
+
+class MergeCompletionsTests(unittest.TestCase):
+    def entry(self, n, last, readings=("ㄋㄧㄣˊ", "ㄉㄜ˙")):
+        return {"r": list(readings), "n": n, "last": last}
+
+    def test_counts_take_the_larger_and_readings_follow_the_newer_side(self) -> None:
+        local = {"您的": self.entry(3, 10)}
+        remote = {"您的": self.entry(2, 20, ("ㄋㄧㄣˊ", "ㄉㄧˊ")), "協助": self.entry(1, 5, ("ㄒㄧㄝˊ", "ㄓㄨˋ"))}
+        merged = merge_completions(local, remote)
+        self.assertEqual({"r": ["ㄋㄧㄣˊ", "ㄉㄧˊ"], "n": 3, "last": 20}, merged["您的"])
+        self.assertIn("協助", merged)
+
+    def test_merging_twice_changes_nothing(self) -> None:
+        remote = {"您的": self.entry(2, 20)}
+        once = merge_completions({"您的": self.entry(3, 10)}, remote)
+        self.assertEqual(once, merge_completions(once, remote))
+
+    def test_entries_whose_readings_do_not_line_up_are_dropped(self) -> None:
+        # 讀音對不上字數的提示接上去之後不能再選字，不該同步到另一台電腦。
+        merged = merge_completions({"您的": {"r": ["ㄋㄧㄣˊ"], "n": 3, "last": 1}}, {})
+        self.assertEqual({}, merged)
+
+
 class SyncDirectoriesTests(unittest.TestCase):
     def _write(self, root: Path, name: str, value) -> None:
         root.mkdir(parents=True, exist_ok=True)
@@ -213,6 +253,23 @@ class SyncDirectoriesTests(unittest.TestCase):
             remote = json.loads((shared / PHRASES_NAME).read_text(encoding="utf-8"))
             self.assertEqual(local, remote)
             self.assertEqual({"ㄕㄨˋ ㄧㄝˋ": "樹葉", "ㄍㄨㄥ ㄕˋ": "公式"}, local)
+
+    def test_habits_and_completions_reach_the_other_machine(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = Path(temp_dir) / "state"
+            shared = Path(temp_dir) / "shared"
+            self._write(state, PAIRS_NAME, {"version": 1, "updated": 1, "pairs": {"試了": 4}})
+            self._write(shared, COMPLETIONS_NAME, {"version": 1, "entries": {
+                "您的協助": {"r": ["ㄋㄧㄣˊ", "ㄉㄜ˙", "ㄒㄧㄝˊ", "ㄓㄨˋ"], "n": 3, "last": 9}}})
+
+            report = sync_directories(state, shared)
+
+            self.assertTrue(report.changed)
+            for root in (state, shared):
+                pairs = json.loads((root / PAIRS_NAME).read_text(encoding="utf-8"))
+                completions = json.loads((root / COMPLETIONS_NAME).read_text(encoding="utf-8"))
+                self.assertEqual({"試了": 4}, pairs["pairs"])
+                self.assertIn("您的協助", completions["entries"])
 
     def test_running_sync_again_reports_no_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

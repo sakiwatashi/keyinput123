@@ -83,10 +83,14 @@
         # 檢查說的是它們**合起來能不能運作**——文字服務 DLL 不見時語言列照樣
         # 選得到我們的輸入法，那個假象只有靠這支才看得穿。
         $healthButton  = New-Button "健康檢查" 110
+        # 自動完成記的是你送出過的句子。記到一句打錯的話會一直被提示，所以要有
+        # 地方清掉；它不在個人詞庫分頁，因為那裡的每一筆都會影響選字，這個不會。
+        $clearCompletionsButton = New-Button "清除自動完成紀錄" 150
         [void]$buttons.Controls.Add($applyButton)
         [void]$buttons.Controls.Add($refreshButton)
         [void]$buttons.Controls.Add($folderButton)
         [void]$buttons.Controls.Add($healthButton)
+        [void]$buttons.Controls.Add($clearCompletionsButton)
 
         # 這兩個助手寫成**變數**而不是 function，$refresh 也一定要 GetNewClosure。
         #
@@ -188,6 +192,41 @@
                 "自動完成（Tab）" $autocompleteSource
             $autocompleteToggle.Checked = $autocomplete
 
+            # 雙詞語言模型。讀不到時輸入法不會報錯，只會悄悄退回只看詞頻的選字，
+            # 所以要在這裡看得到它在不在。判準是檔案在、中繼資料讀得懂。
+            if ($Context.ModuleRoot) {
+                $modelData = Join-Path $Context.ModuleRoot (Join-Path "bopomofo_core" "data")
+                $modelMeta = Join-Path $modelData "bigram_model.json"
+                $modelFile = Join-Path $modelData "bigram_model.bin.gz"
+                if ((Test-Path -LiteralPath $modelMeta) -and (Test-Path -LiteralPath $modelFile)) {
+                    try {
+                        $meta = Get-Content -LiteralPath $modelMeta -Raw -Encoding UTF8 | ConvertFrom-Json
+                        $sizeMb = [math]::Round((Get-Item -LiteralPath $modelFile).Length / 1MB, 1)
+                        & $addRow "存在" "雙詞語言模型（整句選字看前後文）" `
+                            ("{0:N0} 組雙詞、{1} MB；libchewing-data {2}，{3}" -f
+                                $meta.bigrams, $sizeMb, ([string]$meta.source_commit).Substring(0, 8), $meta.license)
+                    }
+                    catch {
+                        & $addRow "無法讀取" "雙詞語言模型" "bigram_model.json 無法解析；選字會退回只看詞頻"
+                    }
+                }
+                else {
+                    & $addRow "找不到" "雙詞語言模型" "模型檔不在，選字會退回只看詞頻。請重新安裝。"
+                }
+            }
+
+            $completionFile = Join-Path $Context.StateRoot "completions.json"
+            $completionCount = 0
+            if (Test-Path -LiteralPath $completionFile) {
+                try {
+                    $completionCount = @((Get-Content -LiteralPath $completionFile -Raw -Encoding UTF8 |
+                        ConvertFrom-Json).entries.PSObject.Properties).Count
+                }
+                catch { $completionCount = 0 }
+            }
+            & $addRow $(if ($completionCount -gt 0) { "存在" } else { "尚未建立" }) `
+                "自動完成紀錄" $(if ($completionCount -gt 0) { "$completionCount 段你送出過的文字（$completionFile）" } else { "還沒有記錄" })
+
             & $addRow $(if (Test-Path -LiteralPath $Context.StateRoot) { "存在" } else { "尚未建立" }) `
                 "個人資料夾" $Context.StateRoot
         }.GetNewClosure()
@@ -266,6 +305,33 @@
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
             }
+        }.GetNewClosure())
+
+        $clearCompletionsButton.Add_Click({
+            $target = Join-Path $Context.StateRoot "completions.json"
+            if (-not (Test-Path -LiteralPath $target)) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "目前沒有自動完成紀錄。", "自動完成",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+                return
+            }
+            $answer = [System.Windows.Forms.MessageBox]::Show(
+                ("會清掉自動完成記得的所有句子，提示要重新累積（同一段後續累計三次才會再出現）。" +
+                 "`r`n`r`n個人詞庫、選字習慣都不受影響。輸入法會重啟一次。要清除嗎？"),
+                "清除自動完成紀錄",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question)
+            if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+            # 要在 PIME 停下之後才刪：輸入法收工時會把記憶體裡的紀錄寫回檔案。
+            $removeTarget = { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }.GetNewClosure()
+            $result = & $Context.RestartPime $Context.LauncherPath $removeTarget
+            & $refresh
+            [System.Windows.Forms.MessageBox]::Show(
+                "已清除自動完成紀錄。$($result.Message)", "自動完成",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                $(if ($result.Success) { [System.Windows.Forms.MessageBoxIcon]::Information }
+                  else { [System.Windows.Forms.MessageBoxIcon]::Warning })) | Out-Null
         }.GetNewClosure())
 
         $folderButton.Add_Click({
