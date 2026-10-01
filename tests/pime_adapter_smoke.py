@@ -2926,6 +2926,30 @@ def main() -> None:
         assert drawn.compositionString == "謝謝您的協助"
         assert mirror.calls[-1] == ("hide",), mirror.calls[-3:]
 
+        # 自動比對到的個人詞只能是軟鎖。使用者的個人詞庫裡學過「ㄒㄧㄚˋ ㄧˉ → 下一」，
+        # ㄅㄨˋ 的單字預設是「不」。打到「下一」時個人詞贏、被鎖住；以前那是硬鎖，
+        # 下一個 ㄅㄨˋ 再也接不成「下一步」，只能落單變成「不」——實測「下一步吧」
+        # 打成「下一不吧」，而空白個人資料打得出來。
+        xia_yi = ["ㄒㄧㄚˋ", "ㄧˉ"]
+        soft = PinnedBopomofoTextService(DummyClient())
+        soft.phrase_store = PhraseStore(os.path.join(appdata, "soft-lock-phrases.json"))
+        soft.phrase_store.learn(xia_yi, "下一")
+        soft.session.pins.pin("ㄅㄨˋ", "不")
+        sequence = type_readings(soft, xia_yi, sequence)
+        assert soft.compositionString == "下一", (
+            "個人詞沒有贏得它自己的跨度", soft.compositionString)
+        sequence = type_readings(soft, ["ㄅㄨˋ", "ㄅㄚ˙"], sequence)
+        assert soft.compositionString == "下一步吧", (
+            "學過的「下一」把後面的字擋在「下一步」之外", soft.compositionString)
+        # 親手選的字仍是硬鎖：選過的字不能被之後的詞網格改掉。
+        hard = PinnedBopomofoTextService(DummyClient())
+        hard.phrase_store = PhraseStore(os.path.join(appdata, "hard-lock-phrases.json"))
+        sequence = type_readings(hard, xia_yi, sequence)
+        force_composition_text(hard, "夏衣")
+        sequence = type_readings(hard, ["ㄅㄨˋ"], sequence)
+        assert hard.compositionString.startswith("夏衣"), (
+            "親手選定的字被詞網格改掉了", hard.compositionString)
+
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 
 

@@ -144,6 +144,11 @@ class BufferedSyllable:
     # uses it to tell a hand-corrected composition apart from the engine's
     # own guesses, which must never teach the personal lexicon.
     user_corrected: bool = False
+    # 鎖住的理由是詞網格自動比對到個人詞，而不是使用者在這次組字裡親手選的。
+    # 這種鎖只擋錯字修正與整句候選，不擋詞網格本身：每多打一個字都要重新
+    # 評估，否則學過的「下一」一旦鎖住，後面的ㄅㄨˋ再也接不成「下一步」，
+    # 只能落單照單字預設變成「不」——實測「下一步吧」因此打成「下一不吧」。
+    auto_locked: bool = False
 
     @property
     def text(self) -> str:
@@ -1438,6 +1443,8 @@ class PinnedBopomofoTextService(TextService):
             )[: self.session.max_candidates]
             segment.selected = 0
             segment.locked = True
+            # 親手選的會蓋過先前自動比對的軟鎖，變成硬鎖。
+            segment.auto_locked = False
             segment.user_corrected = True
         # Move past the chosen word. The next character to the right becomes
         # the next edit target, just like a single-character selection.
@@ -1828,7 +1835,14 @@ class PinnedBopomofoTextService(TextService):
         window = self.segments[start:end]
         readings = [segment.reading for segment in window]
         current_text = "".join(segment.text for segment in window)
-        protected = [segment.locked for segment in window]
+        # 只有親手選的字是硬邊界；自動比對來的個人詞鎖每一輪都放開重算。
+        protected = [
+            segment.locked and not segment.auto_locked for segment in window
+        ]
+        for segment in window:
+            if segment.auto_locked:
+                segment.locked = False
+                segment.auto_locked = False
         spans = decode_phrase_lattice(
             readings,
             current_text,
@@ -1857,6 +1871,7 @@ class PinnedBopomofoTextService(TextService):
                 segment.selected = 0
                 if span.personal:
                     segment.locked = True
+                    segment.auto_locked = True
 
     def _apply_ranked_phrase(
         self, width: int, phrase: str, lock: bool = False, end: int | None = None
