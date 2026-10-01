@@ -27,6 +27,7 @@ from pinned_bopomofo.pinned_bopomofo_ime import (
 )
 from pinned_bopomofo.bopomofo_core.completion_store import CompletionStore
 from pinned_bopomofo.bopomofo_core.context_store import ContextStore
+from pinned_bopomofo.bopomofo_core.pair_store import PairStore
 from pinned_bopomofo.bopomofo_core.word_usage import WordUsageStore
 from pinned_bopomofo.bopomofo_core.phrase_store import PhraseStore
 from pinned_bopomofo.bopomofo_core.keymap import KEY_TO_SYMBOL, keys_for_reading
@@ -2949,6 +2950,30 @@ def main() -> None:
         sequence = type_readings(hard, ["ㄅㄨˋ"], sequence)
         assert hard.compositionString.startswith("夏衣"), (
             "親手選定的字被詞網格改掉了", hard.compositionString)
+
+        # 連字習慣：詞庫只知道「一部」比「一步」常見，不知道「走」後面你接的是「一步」。
+        # 送出過的文字教會詞網格這件事；教的是送出的內容，走真的送出流程。
+        shi_yong = ["ㄗㄡˇ", "ㄧˊ", "ㄅㄨˋ"]
+        habits = PairStore(os.path.join(appdata, "smoke-pairs.json"))
+
+        def type_shi_yong(seq):
+            service = PinnedBopomofoTextService(DummyClient())
+            service.pair_store = habits
+            seq = type_readings(service, shi_yong, seq)
+            return service, seq
+
+        fresh, sequence = type_shi_yong(sequence)
+        assert fresh.compositionString == "走一部", (
+            "前提不成立：沒有習慣時這個例子本來就打對，下面什麼都沒驗", fresh.compositionString)
+        for _ in range(3):
+            corrected, sequence = type_shi_yong(sequence)
+            force_composition_text(corrected, "走一步")
+            special_key(corrected, 0x0D, sequence)
+            sequence += 1
+        assert habits.count("一步") == 3, ("送出的文字沒有記進連字習慣", habits.count("一步"))
+        learned, sequence = type_shi_yong(sequence)
+        assert learned.compositionString == "走一步", (
+            "送出三次「走一步」之後還是打成別的", learned.compositionString)
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

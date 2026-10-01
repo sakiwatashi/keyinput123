@@ -28,6 +28,8 @@
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tools/build_reading_phrase_lexicon.py`：合併固定版本 McBopomofo、libchewing-data 與 Rime Essay 權重，重建 `reading_phrases.json.gz`；生成檔不應手工修改。
+- `bopomofo_core/pair_store.py`：連字習慣。送出文字裡每一對相鄰漢字的次數
+  （`pairs.json`），詞網格用它判斷上下文；第一次啟動時由 `usage.json` 預先學一輪。
 - `bopomofo_core/completion_store.py`：自動完成。記錄送出的每一段中文與讀音
   （`completions.json`），打到一半時提示後半段；開關 `autocomplete.json`，預設開啟。
 - `bopomofo_core/candidate_ui_client.py`：把候選清單鏡像給行程外候選視窗。射後
@@ -350,10 +352,24 @@ it and the local reads as `$null`. Static check lives in
   weight through the global phrase lattice, so a shorter suffix cannot
   overwrite a longer complete conversion; equal spans prefer the pinned
   Rime/McBopomofo occurrence weights before the legacy engine.
+  Between segmentations of equal coverage, span length is **not** a rank of
+  its own above frequency: each dictionary span pays `SPAN_COST` in log
+  frequency units instead. Ranking length first let any two-character word
+  beat two very common single characters (現在是用 -> 現在適用, 是能 -> 勢能).
+  `SPAN_COST` was chosen by replaying the user's confirmed sentences and
+  counting manual selections; retune it the same way, never by one example.
+  The user's own adjacent-character pairs (`pair_store.py`) add to that score,
+  including the pair across a span boundary. They are counted from every
+  commit, like `word_usage.json`: a statistic that only adds weight, never a
+  pin or a lock, so it is the one sanctioned exception to "automatic commits
+  must not teach".
   A stored single-character pin stays candidate zero for isolated input but
   is not a context lock; a reliable word or whole-buffer conversion may
   override it. Only a choice made explicitly in the current composition
-  locks its covered segments.
+  locks its covered segments. A personal phrase the lattice matched on its
+  own is only `auto_locked`: protected from autocorrection and whole-buffer
+  rewrites, but re-decoded on every keystroke, or a learned 下一 keeps the
+  next ㄅㄨˋ from ever joining into 下一步.
 - A learned personal phrase wins its own span and nothing wider. In the
   lattice it is scored just above the strongest bundled option for the same
   readings, and personal origin is the last tiebreaker rather than the first.
@@ -361,7 +377,9 @@ it and the local reads as `$null`. Static check lives in
   learned in one sentence dismantled a far stronger word in another: 電話
   (weight 50001) lost to a learned 化一 (weight 0) and 電話一 came out as
   店化一. Never give a personal phrase an unbounded weight or restore it to
-  the front of the score tuple.
+  the front of the score tuple. With a cost per span it must still beat any
+  bundled split of its own span (`_best_bundled_split`), by a hair and no
+  more, or a learned 因該 falls apart into 因+該.
   Automatic commits must not silently teach the personal stores.
 - Single-character ranking preserves libchewing's reading-aware dictionary
   default, then uses global Taiwan frequency for the remaining tail. Global

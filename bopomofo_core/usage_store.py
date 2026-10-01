@@ -103,6 +103,10 @@ class UsageStore:
         )
         self._counts = dict(ranked[:TRIM_TO])
 
+    def texts(self) -> list[tuple[str, int]]:
+        """Every committed string with how many times it was committed."""
+        return [(text, entry["n"]) for text, entry in self._counts.items()]
+
     # ---- queries used by the control panel --------------------------------
 
     def by_length(self) -> dict[int, int]:

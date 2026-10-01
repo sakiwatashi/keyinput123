@@ -11,6 +11,23 @@ PhraseLookup = Callable[[List[str]], List[str]]
 PhraseWeight = Callable[[List[str], str], int]
 # (readings, left-context character) -> (phrase, whether the context matched)
 PersonalLookup = Callable[[List[str], str], "tuple[str, bool]"]
+# (left-context character, span text) -> bonus for how often the user has typed
+# these characters next to each other.
+PairScore = Callable[[str, str], float]
+
+# What each dictionary span costs, in the same log units as frequency.
+#
+# Segmentations used to be ranked by span length before frequency, so any
+# two-character word beat two single characters however rare the word was:
+# 現在是用 became 現在適用, 是能 became 勢能, 是想 became 試想 -- 是 is among the
+# most common characters in the language and still lost to every word it
+# could be glued into. Summing log frequencies alone goes wrong the other way
+# (more spans always add more), so each span pays a fixed cost instead.
+#
+# Measured by replaying the user's 1068 confirmed sentences and counting the
+# manual selections needed (the old ordering: 898). 0-6 gave 1029, 12 gave
+# 936, 16 gave 879, 20 gave 887, 30 and above fell back to 898.
+SPAN_COST = 16.0
 
 # How much more frequent a bundled word may be before a context-free personal
 # preference stops overruling it.
@@ -51,6 +68,36 @@ def _is_near_miss(phrase: str, candidates: Sequence[str]) -> bool:
     return False
 
 
+def _best_bundled_split(
+    readings: Sequence[str],
+    phrase_lookup: PhraseLookup,
+    phrase_weight: PhraseWeight,
+    max_phrase_length: int,
+) -> float:
+    """The best score the lexicon alone can give these readings, however split.
+
+    A learned personal phrase has to beat this, not just the bundled words of
+    exactly its own width: with a cost per span, two common single characters
+    can outscore a lone personal entry, and the user's own 因該 came out as
+    因+該 even though they had learned it for exactly these readings.
+    """
+    count = len(readings)
+    best = [-math.inf] * (count + 1)
+    best[0] = 0.0
+    for start in range(count):
+        if best[start] == -math.inf:
+            continue
+        for width in range(1, min(max_phrase_length, count - start) + 1):
+            span = list(readings[start : start + width])
+            for option in phrase_lookup(span):
+                if len(option) != width:
+                    continue
+                value = best[start] + math.log1p(max(0, phrase_weight(span, option))) - SPAN_COST
+                if value > best[start + width]:
+                    best[start + width] = value
+    return best[count]
+
+
 @dataclass(frozen=True)
 class DecodedSpan:
     start: int
@@ -68,8 +115,12 @@ class _Path:
     spans: tuple[DecodedSpan, ...]
 
     @property
-    def score(self) -> tuple[int, int, float, int]:
-        """Coverage, then span length, then frequency, then personal origin.
+    def score(self) -> tuple[int, float, int]:
+        """Coverage, then frequency, then personal origin.
+
+        Span length is no longer a separate rank above frequency; it is priced
+        into the frequency through SPAN_COST, so a long common word still wins
+        but a rare word no longer beats common single characters by default.
 
         Personal origin is the last tiebreaker rather than the first. Ranking
         it first made any learned pair unbeatable, so a phrase learned in one
@@ -81,7 +132,6 @@ class _Path:
         """
         return (
             self.covered_characters,
-            self.compaction,
             self.frequency_score,
             self.personal_characters,
         )
@@ -95,11 +145,14 @@ def decode_phrase_lattice(
     phrase_weight: PhraseWeight,
     personal_lookup: PersonalLookup,
     max_phrase_length: int = 12,
+    pair_score: PairScore | None = None,
 ) -> list[DecodedSpan]:
     """Return the best non-overlapping phrase segmentation.
 
-    Segmentations are compared by exact-reading coverage, then by how much of
-    that coverage comes from longer coherent spans, then by source frequency.
+    Segmentations are compared by exact-reading coverage, then by source
+    frequency with a fixed cost per span (SPAN_COST), plus -- when
+    ``pair_score`` is given -- how often the user has typed each pair of
+    adjacent characters, including across span boundaries.
     Single characters remain a lossless fallback, so the decoder never needs
     an entire sentence to exist as one dictionary row.
 
@@ -124,10 +177,12 @@ def decode_phrase_lattice(
         # A protected character is an explicit choice in this composition.
         # It forms a hard boundary and cannot be swallowed by a phrase edge.
         single = DecodedSpan(start, start + 1, current_text[start])
+        left = path.spans[-1].text[-1] if path.spans else ""
         single_path = _Path(
             path.covered_characters,
             path.compaction,
-            path.frequency_score,
+            path.frequency_score
+            + (pair_score(left, single.text) if pair_score else 0.0),
             path.personal_characters,
             path.spans + (single,),
         )
@@ -159,6 +214,7 @@ def decode_phrase_lattice(
                 if len(phrase) != width:
                     continue
                 is_personal = bool(personal and phrase == personal)
+                demoted = False
                 if is_personal:
                     # The user's answer for this span outranks every bundled
                     # option for the same span, and nothing more. Giving it an
@@ -193,12 +249,25 @@ def decode_phrase_lattice(
                         # to.
                         if own * PERSONAL_OVERRIDE_RATIO < best_bundled:
                             weight = own
+                            demoted = True
                 else:
                     weight = max(0, phrase_weight(span_readings, phrase))
+                value = math.log1p(weight) - SPAN_COST
+                if is_personal and not demoted and width > 1:
+                    # Just above the best the lexicon can do for this span in
+                    # any split -- enough to win its own span, and nothing
+                    # more, so it still cannot dismantle a stronger neighbour.
+                    split = _best_bundled_split(
+                        span_readings, phrase_lookup, phrase_weight, max_phrase_length
+                    )
+                    if split > value:
+                        value = split + 1e-6
                 candidate_path = _Path(
                     path.covered_characters + width,
                     path.compaction + max(0, width - 1),
-                    path.frequency_score + math.log1p(weight),
+                    path.frequency_score
+                    + value
+                    + (pair_score(context, phrase) if pair_score else 0.0),
                     path.personal_characters + (width if is_personal else 0),
                     path.spans
                     + (DecodedSpan(start, end, phrase, is_personal),),

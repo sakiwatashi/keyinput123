@@ -23,6 +23,7 @@ from .bopomofo_core.hidden_characters import (
 from .bopomofo_core.keymap import is_typable_reading, load_layout, symbol_for_event
 from .bopomofo_core.libchewing_provider import LibChewingProvider
 from .bopomofo_core.phrase_decoder import decode_phrase_lattice
+from .bopomofo_core.pair_store import PairStore
 from .bopomofo_core.usage_store import UsageStore
 from .bopomofo_core.word_usage import WordUsageStore
 from .bopomofo_core.phrase_store import (
@@ -213,6 +214,17 @@ class PinnedBopomofoTextService(TextService):
         # 提示是不是交給行程外候選視窗畫的。是的話 PIME 的訊息窗只顯示一個空白，
         # 當作定位信標；不是的話（輔助程式沒在跑）就由訊息窗顯示完整文字。
         self.completion_via_helper = False
+        # 你打字時哪兩個字常連在一起，給詞網格判斷上下文（在｜是 vs 在｜適）。
+        # 第一次啟動時用既有的送出紀錄預先學一輪，不必從零累積。
+        pair_path = os.path.join(appdata, "PinnedBopomofo", "pairs.json")
+        first_run = not os.path.exists(pair_path)
+        self.pair_store = PairStore(pair_path)
+        if first_run:
+            try:
+                self.pair_store.bootstrap(self.usage_store.texts())
+            except Exception:
+                # 預先學習只是加速；失敗就從零開始累積，不能擋住輸入法啟動。
+                pass
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         # 讀一次就好。打字路徑上碰硬碟會卡住宿主程式的輸入執行緒。
@@ -405,6 +417,7 @@ class PinnedBopomofoTextService(TextService):
             self.usage_store.flush()
             self.word_usage.flush()
             self.completion_store.flush()
+            self.pair_store.flush()
         except Exception:
             pass
 
@@ -1123,6 +1136,7 @@ class PinnedBopomofoTextService(TextService):
                 self._weighted_phrase,
                 self._personal_phrase,
                 MAX_PHRASE_LENGTH,
+                pair_score=self._pair_score,
             )
             for span in decoded:
                 if span.end - span.start < 2 or span.text != current_text[
@@ -1744,6 +1758,13 @@ class PinnedBopomofoTextService(TextService):
             else:
                 index += 1
 
+    def _pair_score(self, left: str, text: str) -> float:
+        """詞網格每一種切法都會問這個；算壞了就當沒有上下文，不能擋住打字。"""
+        try:
+            return self.pair_store.bonus(left, text)
+        except Exception:
+            return 0.0
+
     def _weighted_phrase(self, readings: list[str], phrase: str) -> int:
         """詞庫權重加上你自己用過幾次。
 
@@ -1851,6 +1872,7 @@ class PinnedBopomofoTextService(TextService):
             self._weighted_phrase,
             self._personal_phrase,
             MAX_PHRASE_LENGTH,
+            pair_score=self._pair_score,
         )
         for span in spans:
             # 「一律隱藏」的字不能從這裡溜進組字區。詞網格是直接把選中的字寫進
@@ -2014,6 +2036,11 @@ class PinnedBopomofoTextService(TextService):
                 )
         self._record_word_usage()
         self._record_completions()
+        try:
+            self.pair_store.record(text)
+        except Exception:
+            # 統計絕不能擋住送字。
+            pass
         self.setCommitString(text + suffix)
         self._clear_all()
         self.setCompositionString("")
