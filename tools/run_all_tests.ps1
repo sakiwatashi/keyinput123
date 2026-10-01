@@ -75,6 +75,10 @@ else {
             & $pythonPath (Join-Path $projectRoot "tests\pime_all_readings_audit.py")
         }
     }
+    # 選字模擬器的量尺本身要分辨得出好壞，否則拿它決定排序改版等於沒量。
+    Invoke-Step "replay_typing.py --self-test" {
+        & $pythonPath (Join-Path $projectRoot "tools\replay_typing.py") --self-test
+    }
 }
 
 Write-Host ""
