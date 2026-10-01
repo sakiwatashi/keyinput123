@@ -28,6 +28,11 @@
 - `bopomofo_core/phonetic_corrector.py`：以每個字保留的注音、候選欄與常用詞庫重新解碼；同一讀音或保守的注音槽位混淆不應展開成大量表面錯字規則。
 - `tools/build_frequency_lexicon.py`：從固定版本 Rime Essay 重建臺灣正體高頻詞索引。生成的 JSON 不應手工修改。
 - `tools/build_reading_phrase_lexicon.py`：合併固定版本 McBopomofo、libchewing-data 與 Rime Essay 權重，重建 `reading_phrases.json.gz`；生成檔不應手工修改。
+- `bopomofo_core/bigram_model.py`：詞的雙詞語言模型（libchewing-data，CC BY 4.0），
+  整句選字用它判斷前後文。資料 `data/bigram_model.bin.gz` 由
+  `tools/build_bigram_model.py` 從釘死版本與 SHA-256 的 `bigram_p50.arpa` 產生，
+  不可手改；授權全文 `licenses/libchewing-data-CC-BY-4.0.txt`，出處寫在
+  `THIRD_PARTY_NOTICES.txt` 第 6 項。讀不到模型時整句選字退回只看詞頻。
 - `bopomofo_core/pair_store.py`：連字習慣。送出文字裡每一對相鄰漢字的次數
   （`pairs.json`），詞網格用它判斷上下文；第一次啟動時由 `usage.json` 預先學一輪。
 - `bopomofo_core/completion_store.py`：自動完成。記錄送出的每一段中文與讀音
@@ -363,6 +368,26 @@ it and the local reads as `$null`. Static check lives in
   commit, like `word_usage.json`: a statistic that only adds weight, never a
   pin or a lock, so it is the one sanctioned exception to "automatic commits
   must not teach".
+  When the bundled bigram model loads, the lattice decodes with it instead
+  (`_decode_with_language_model`): each position keeps the best
+  `LANGUAGE_MODEL_BEAM` paths, one per distinct last word, scored by
+  ln P(word) plus `CONTEXT_WEIGHT` x the stored bigram's lift over that
+  word's unigram. Three rules keep the existing contracts and must stay:
+  (1) a word's model frequency is multiplied by its **reading share** from
+  our reading-aware lexicon (`ReadingPhraseLexicon.reading_share`) -- the
+  model does not split 說 by reading, and without the share 我睡 becomes 我說
+  and 我快 becomes 我會. The all-readings audit does **not** catch this -- it
+  checks single-reading candidates, and a lone syllable never goes through the
+  lattice; `pime_adapter_smoke.py` pins those two sentences instead; (2) a personal
+  phrase is floored just above the best lexicon split of its span under the
+  same context; (3) the result is regrouped into lexicon words
+  (`_rechunk`), because the model decodes a word it lacks (層數) as 層|數 and
+  the ranking layer only trusts multi-character spans -- without it an
+  unrelated engine guess (曾恕較高) replaced the right text. Stored bigrams
+  are not mixed with the unigram (no lambda floor): the floor erased the
+  model's evidence that 是了 is rare. `CONTEXT_WEIGHT` 0.8 rather than 1.0
+  keeps the README sentence 每遇到一句新句子 (1.0 gives 一具; 0.6 loses
+  我試了一下). Retune only with the replay simulator, never by one example.
   A stored single-character pin stays candidate zero for isolated input but
   is not a context lock; a reliable word or whole-buffer conversion may
   override it. Only a choice made explicitly in the current composition

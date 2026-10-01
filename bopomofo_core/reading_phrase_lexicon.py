@@ -60,6 +60,7 @@ class ReadingPhraseLexicon:
             for phrase, weight in words.items():
                 target.setdefault(phrase, weight)
         self._row_cache: dict[str, tuple[list[tuple[str, int]], dict[str, int]]] = {}
+        self._reading_index: dict[str, list[str]] | None = None
         if not self.path.exists():
             return
         try:
@@ -234,6 +235,49 @@ class ReadingPhraseLexicon:
                 if len(results) >= limit:
                     break
         return results
+
+    def reading_share(self, readings: list[str], phrase: str) -> float:
+        """這個讀音佔這個字詞全部讀音的比例，用同一組調整過的權重算。
+
+        語言模型的詞頻不分讀音：「還」的頻率幾乎都是 ㄏㄞˊ，直接拿來比會讓它在
+        ㄒㄩㄢˊ 壓過「玄」——正是破音字詞頻按讀音拆開之前的那個錯。乘上這個
+        比例，模型的頻率就只算屬於這個讀音的那一份。只有一個讀音的回傳 1.0。
+        """
+        if self._reading_index is None:
+            self._reading_index = self._build_reading_index()
+        keys = self._reading_index.get(phrase)
+        if not keys:
+            return 1.0
+        total = sum(self.weight(key.split(" "), phrase) for key in keys)
+        if total <= 0:
+            return 1.0
+        return self.weight(readings, phrase) / total
+
+    def _build_reading_index(self) -> dict[str, list[str]]:
+        """字詞 -> 它出現的所有讀音，只記出現在兩個以上讀音底下的。"""
+        # 逐列掃，不先把整份詞庫展開成一份清單：PIME 的 Python 是 32 位元、
+        # 所有應用程式共用一個行程，展開的寫法實測多吃了 69 MB 而且回收不掉。
+        first: dict[str, str] = {}
+        many: dict[str, list[str]] = {}
+
+        def see(phrase: object, key: str) -> None:
+            if not isinstance(phrase, str):
+                return
+            seen = first.setdefault(phrase, key)
+            if seen != key:
+                keys = many.setdefault(phrase, [seen])
+                if key not in keys:
+                    keys.append(key)
+
+        for key, rows in self._entries.items():
+            for row in rows:
+                if isinstance(row, list) and row:
+                    see(row[0], key)
+        for key, words in self._extra.items():
+            for phrase in words:
+                see(phrase, key)
+        first.clear()
+        return many
 
     def weight(self, readings: list[str], phrase: str) -> int:
         if len(phrase) != len(readings):

@@ -13,6 +13,7 @@ from textService import TextService
 
 from . import pinned_libchewing
 from .bopomofo_core.autocorrect import Autocorrector
+from .bopomofo_core.bigram_model import shared_model as shared_language_model
 from .bopomofo_core.candidate_ui_client import shared_client as candidate_ui_client
 from .bopomofo_core.completion_store import CompletionStore, autocomplete_enabled
 from .bopomofo_core.context_store import ContextStore
@@ -225,6 +226,13 @@ class PinnedBopomofoTextService(TextService):
             except Exception:
                 # 預先學習只是加速；失敗就從零開始累積，不能擋住輸入法啟動。
                 pass
+        # 詞的雙詞語言模型（libchewing-data，CC BY 4.0）。整個行程共用一份；
+        # 讀不到就是 None，整句選字退回只看詞頻的算法。
+        self.language_model = shared_language_model()
+        if self.language_model is not None:
+            # 讀音比例的索引第一次用到才建，要掃過整份詞庫；放在按鍵裡實測讓
+            # 第一個整句選字卡了 405 ms。在這裡先建好（整個行程只建一次）。
+            self._reading_share(["ㄕˋ"], "是")
         self.autocorrector = Autocorrector()
         self.phonetic_corrector = PhoneticCorrector(MAX_PHRASE_LENGTH)
         # 讀一次就好。打字路徑上碰硬碟會卡住宿主程式的輸入執行緒。
@@ -1137,6 +1145,8 @@ class PinnedBopomofoTextService(TextService):
                 self._personal_phrase,
                 MAX_PHRASE_LENGTH,
                 pair_score=self._pair_score,
+                language_model=self.language_model,
+                reading_share=self._reading_share,
             )
             for span in decoded:
                 if span.end - span.start < 2 or span.text != current_text[
@@ -1758,6 +1768,16 @@ class PinnedBopomofoTextService(TextService):
             else:
                 index += 1
 
+    def _reading_share(self, readings: list[str], word: str) -> float:
+        """這個讀音佔這個字詞的比例；問不到就當只有一個讀音。"""
+        share = getattr(self.session.provider, "reading_share", None)
+        if share is None:
+            return 1.0
+        try:
+            return share(readings, word)
+        except Exception:
+            return 1.0
+
     def _pair_score(self, left: str, text: str) -> float:
         """詞網格每一種切法都會問這個；算壞了就當沒有上下文，不能擋住打字。"""
         try:
@@ -1873,6 +1893,8 @@ class PinnedBopomofoTextService(TextService):
             self._personal_phrase,
             MAX_PHRASE_LENGTH,
             pair_score=self._pair_score,
+            language_model=self.language_model,
+            reading_share=self._reading_share,
         )
         for span in spans:
             # 「一律隱藏」的字不能從這裡溜進組字區。詞網格是直接把選中的字寫進

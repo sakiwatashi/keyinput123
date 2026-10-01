@@ -14,6 +14,9 @@ PersonalLookup = Callable[[List[str], str], "tuple[str, bool]"]
 # (left-context character, span text) -> bonus for how often the user has typed
 # these characters next to each other.
 PairScore = Callable[[str, str], float]
+# (readings, word) -> the share of the word's frequency that belongs to these
+# readings (還 under ㄒㄩㄢˊ is a small share of 還). 1.0 for one reading.
+ReadingShare = Callable[[List[str], str], float]
 
 # What each dictionary span costs, in the same log units as frequency.
 #
@@ -146,6 +149,8 @@ def decode_phrase_lattice(
     personal_lookup: PersonalLookup,
     max_phrase_length: int = 12,
     pair_score: PairScore | None = None,
+    language_model=None,
+    reading_share: ReadingShare | None = None,
 ) -> list[DecodedSpan]:
     """Return the best non-overlapping phrase segmentation.
 
@@ -166,6 +171,12 @@ def decode_phrase_lattice(
         raise ValueError("readings, text, and protection mask must align")
     if not count:
         return []
+    if language_model is not None:
+        return _decode_with_language_model(
+            readings, current_text, protected, phrase_lookup, phrase_weight,
+            personal_lookup, max_phrase_length, pair_score, language_model,
+            reading_share or (lambda span, word: 1.0),
+        )
 
     paths: list[_Path | None] = [None] * (count + 1)
     paths[0] = _Path(0, 0, 0.0, 0, ())
@@ -277,3 +288,190 @@ def decode_phrase_lattice(
 
     result = paths[count]
     return list(result.spans) if result is not None else []
+
+
+# ---- language-model decoding -------------------------------------------------
+#
+# With a word-bigram model the best path no longer depends only on where it
+# ends but on its last word, so each position keeps the best few paths, one per
+# distinct last word. That is the difference that matters: the frequency-only
+# decoder kept one path per position, so 我是 could swallow 是 before the model
+# ever saw that 了一下 follows. Every constant below was set by replaying the
+# user's confirmed sentences and counting manual selections (see the commit).
+
+# Paths kept per position, one per distinct last word. 8 and 16 measured the
+# same; fewer starts dropping the path a later word needs.
+LANGUAGE_MODEL_BEAM = 8
+# What keeping a syllable as the raw text on screen costs, in log units, when
+# no dictionary entry covers it. It only has to lose to any real word.
+LITERAL_COST = 20.0
+# How strongly the left word's context counts against the word's own
+# frequency. 1.0 trusts every stored bigram fully.
+CONTEXT_WEIGHT = 0.8
+
+
+def _decode_with_language_model(
+    readings, current_text, protected, phrase_lookup, phrase_weight,
+    personal_lookup, max_phrase_length, pair_score, model, reading_share,
+):
+    count = len(readings)
+
+    def base(span_readings, word):
+        """ln P(word) for these readings, on the model's scale."""
+        lnp = model.unigram_ln(word)
+        if lnp is None:
+            # A word the model does not have: our own weight, calibrated onto
+            # the model's scale on the words both know.
+            return math.log(max(0, phrase_weight(span_readings, word)) + 1) + model.oov_offset
+        share = reading_share(span_readings, word)
+        return lnp + math.log(share) if share > 0 else lnp - 30.0
+
+    def transition(previous, span_readings, word, word_base):
+        """ln P(word | previous). A stored bigram is used as it is: mixing the
+        unigram back in puts a floor under it, and that floor erased the
+        model's evidence that 是了 is rare -- 試了一下 kept coming out 是了一下.
+        The reading share is applied to the bigram as well, so a polyphone's
+        context probability counts only the share that belongs to this reading.
+        """
+        if previous:
+            bigram = model.bigram_ln(previous, word)
+            unigram = model.unigram_ln(word)
+            if bigram is not None and unigram is not None:
+                # How much this context moves the word away from its usual
+                # frequency, scaled by CONTEXT_WEIGHT, on top of the word's own
+                # reading-aware frequency.
+                return word_base + CONTEXT_WEIGHT * (bigram - unigram)
+        return model.log_floor + word_base
+
+    def bonus(left, text):
+        return pair_score(left, text) if pair_score else 0.0
+
+    # states[position][last word] = (covered, score, personal chars, spans)
+    states: list[dict] = [dict() for _ in range(count + 1)]
+    states[0][""] = (0, 0.0, 0, ())
+
+    def offer(position, word, entry):
+        best = states[position].get(word)
+        if best is None or entry[:3] > best[:3]:
+            states[position][word] = entry
+
+    def best_split(start_context, span_readings):
+        """The best the lexicon can do for this span in any split, scored with
+        the same context -- the bar a personal phrase has to clear."""
+        width = len(span_readings)
+        best = [-math.inf] * (width + 1)
+        last = [start_context] + [""] * width
+        best[0] = 0.0
+        for i in range(width):
+            if best[i] == -math.inf:
+                continue
+            for w in range(1, width - i + 1):
+                sub = list(span_readings[i : i + w])
+                for option in phrase_lookup(sub):
+                    if len(option) != w:
+                        continue
+                    value = best[i] + transition(last[i], sub, option, base(sub, option))
+                    if value > best[i + w]:
+                        best[i + w] = value
+                        last[i + w] = option
+        return best[width]
+
+    for start in range(count):
+        if not states[start]:
+            continue
+        ranked = sorted(states[start].items(), key=lambda item: item[1][:3], reverse=True)
+        for previous, (covered, score, personal_chars, spans) in ranked[:LANGUAGE_MODEL_BEAM]:
+            left = spans[-1].text[-1] if spans else ""
+            # Keeping what is on screen is always possible, never preferred.
+            literal = current_text[start]
+            literal_readings = [readings[start]]
+            offer(start + 1, literal, (
+                covered,
+                score + transition(previous, literal_readings, literal, base(literal_readings, literal))
+                - LITERAL_COST + bonus(left, literal),
+                personal_chars,
+                spans + (DecodedSpan(start, start + 1, literal),),
+            ))
+            if protected[start]:
+                continue
+            for width in range(1, min(max_phrase_length, count - start) + 1):
+                end = start + width
+                if any(protected[start:end]):
+                    break
+                span_readings = list(readings[start:end])
+                personal, contextual = personal_lookup(span_readings, left)
+                candidates = [c for c in phrase_lookup(span_readings) if len(c) == width]
+                scored = {
+                    word: transition(previous, span_readings, word, base(span_readings, word))
+                    for word in candidates
+                }
+                options = list(dict.fromkeys(
+                    ([personal] if personal and len(personal) == width else []) + candidates
+                ))
+                for word in options:
+                    is_personal = bool(personal and word == personal)
+                    if is_personal:
+                        own = scored.get(word)
+                        if own is None:
+                            own = transition(previous, span_readings, word, base(span_readings, word))
+                        demoted = False
+                        if not contextual and (word in candidates or _is_near_miss(word, candidates)):
+                            own_weight = max(0, phrase_weight(span_readings, word))
+                            best_weight = max(
+                                (max(0, phrase_weight(span_readings, c)) for c in candidates),
+                                default=0,
+                            )
+                            demoted = own_weight * PERSONAL_OVERRIDE_RATIO < best_weight
+                        if demoted:
+                            value = own
+                        else:
+                            # Just above the best any lexicon split can do
+                            # here -- enough to win its own span, nothing more.
+                            bar = best_split(previous, span_readings)
+                            if scored:
+                                bar = max(bar, max(scored.values()))
+                            value = max(own, bar + 1e-6) if bar != -math.inf else own
+                    else:
+                        value = scored[word]
+                    offer(end, word, (
+                        covered + width,
+                        score + value + bonus(left, word),
+                        personal_chars + (width if is_personal else 0),
+                        spans + (DecodedSpan(start, end, word, is_personal),),
+                    ))
+
+    final = max(states[count].values(), key=lambda entry: entry[:3])
+    return _rechunk(list(final[3]), readings, phrase_lookup)
+
+
+def _rechunk(spans, readings, phrase_lookup):
+    """Join adjacent non-personal spans back into the longest lexicon words.
+
+    The model was trained on text its own tokenizer split, so a word it lacks
+    (層數) is best decoded as 層|數 -- the right text, as single characters. The
+    rest of the input method treats multi-character spans as reliable context,
+    so 層|數|較|高 left nothing to protect and an unrelated engine guess
+    (曾恕較高) took over. The text is unchanged; only the grouping is restored.
+    """
+    result = []
+    index = 0
+    while index < len(spans):
+        span = spans[index]
+        if span.personal:
+            result.append(span)
+            index += 1
+            continue
+        merged = span
+        best_end = index
+        text = span.text
+        for j in range(index + 1, len(spans)):
+            if spans[j].personal:
+                break
+            text += spans[j].text
+            start, end = span.start, spans[j].end
+            if text in phrase_lookup(list(readings[start:end])):
+                merged = DecodedSpan(start, end, text)
+                best_end = j
+        result.append(merged)
+        index = best_end + 1
+    return result

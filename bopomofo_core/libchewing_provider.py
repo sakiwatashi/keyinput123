@@ -310,6 +310,10 @@ class LibChewingProvider:
     def phrase_weight(readings: list[str], phrase: str) -> int:
         return READING_PHRASE_LEXICON.weight(readings, phrase)
 
+    @staticmethod
+    def reading_share(readings: list[str], phrase: str) -> float:
+        return READING_PHRASE_LEXICON.reading_share(readings, phrase)
+
     def frequent_phrase_candidates(
         self, candidate_columns: list[list[str]]
     ) -> list[str]:

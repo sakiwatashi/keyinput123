@@ -91,6 +91,7 @@ Section "安裝智慧優先注音" SEC_MAIN
     File "..\release-staging\rime-essay-LICENSE.txt"
     File "..\release-staging\MOE-OPEN-DATA-NOTICE.txt"
     File "..\release-staging\McBopomofo-LICENSE.txt"
+    File "..\release-staging\libchewing-data-CC-BY-4.0.txt"
 
     InitPluginsDir
     SetOutPath "$PLUGINSDIR\payload"

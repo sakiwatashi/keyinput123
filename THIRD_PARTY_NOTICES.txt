@@ -51,6 +51,18 @@
    單字／詞語的精確注音索引。Rime Essay 權重只套用到已有明確注音證據
    的拼法，不會用文字相同推測破音字讀法。
 
+6. 新酷音雙詞語言模型（Chewing Chinese Bigram Language Model）
+   專案：https://codeberg.org/chewing/libchewing-data
+   檔案：dict/chewing_v4/bigram_p50.arpa
+   原始碼版本：40acb515b420eb0eaeb0186db1113a72cc9f4e94
+   原始檔 SHA-256：ce25ad7e282cfc710f61eea20ba666b3116ffc37de02f92e2df889fbeb811ee5
+   著作權：Chewing Project
+   授權：Creative Commons Attribution 4.0 International（CC BY 4.0）
+         https://creativecommons.org/licenses/by/4.0/
+   修改：由 tools/build_bigram_model.py 從 ARPA 文字格式轉成精簡的二進位
+   表（bopomofo_core/data/bigram_model.bin.gz），對數機率四捨五入到
+   0.001；沒有增刪任何詞條。整句選字以它判斷前後文。
+
 完整授權條款隨安裝程式放在安裝目錄：
 
 - PIME-LICENSE.txt
@@ -58,6 +70,7 @@
 - rime-essay-LICENSE.txt
 - MOE-OPEN-DATA-NOTICE.txt
 - McBopomofo-LICENSE.txt
+- libchewing-data-CC-BY-4.0.txt
 
 個人學習資料位於 %APPDATA%\PinnedBopomofo。解除安裝預設保留該資料，方便
 重新安裝或自行備份。

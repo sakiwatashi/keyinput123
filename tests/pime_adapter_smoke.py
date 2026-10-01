@@ -2738,7 +2738,12 @@ def main() -> None:
             {"method": "onActivate", "seqNum": sequence, "isKeyboardOpen": False}
         )
         sequence += 1
-        assert type_si_shi(by_default, sequence) == "思師", "預設應該是關閉的"
+        # 關閉時只能出現讀音完全吻合的轉換。以前這裡寫死「思師」，語言模型
+        # 依上下文改選「思詩」之後就紅了——但兩者都是精確讀音，要擋的是讀音
+        # 差一格的「絲絲」。打開之後得到「絲絲」的那一條仍在下面，所以這支測試
+        # 還分得出開和關。
+        default_text = type_si_shi(by_default, sequence)
+        assert default_text != "絲絲" and len(default_text) == 2, ("預設應該是關閉的", default_text)
         sequence += 10
 
         with open(preference_file, "w", encoding="utf-8") as handle:
@@ -2951,9 +2956,10 @@ def main() -> None:
         assert hard.compositionString.startswith("夏衣"), (
             "親手選定的字被詞網格改掉了", hard.compositionString)
 
-        # 連字習慣：詞庫只知道「一部」比「一步」常見，不知道「走」後面你接的是「一步」。
+        # 連字習慣：語言模型知道「試」後面常接「看看」，但輪到「試」時它只看得到
+        # 左邊的「你」，於是「你試看看吧」打成「你是看看吧」。送出過的文字補上這一環。
         # 送出過的文字教會詞網格這件事；教的是送出的內容，走真的送出流程。
-        shi_yong = ["ㄗㄡˇ", "ㄧˊ", "ㄅㄨˋ"]
+        shi_yong = ["ㄋㄧˇ", "ㄕˋ", "ㄎㄢˋ", "ㄎㄢˋ", "ㄅㄚ˙"]
         habits = PairStore(os.path.join(appdata, "smoke-pairs.json"))
 
         def type_shi_yong(seq):
@@ -2963,17 +2969,37 @@ def main() -> None:
             return service, seq
 
         fresh, sequence = type_shi_yong(sequence)
-        assert fresh.compositionString == "走一部", (
+        assert fresh.compositionString == "你是看看吧", (
             "前提不成立：沒有習慣時這個例子本來就打對，下面什麼都沒驗", fresh.compositionString)
         for _ in range(3):
             corrected, sequence = type_shi_yong(sequence)
-            force_composition_text(corrected, "走一步")
+            force_composition_text(corrected, "你試看看吧")
             special_key(corrected, 0x0D, sequence)
             sequence += 1
-        assert habits.count("一步") == 3, ("送出的文字沒有記進連字習慣", habits.count("一步"))
+        assert habits.count("試看") == 3, ("送出的文字沒有記進連字習慣", habits.count("試看"))
         learned, sequence = type_shi_yong(sequence)
-        assert learned.compositionString == "走一步", (
-            "送出三次「走一步」之後還是打成別的", learned.compositionString)
+        assert learned.compositionString == "你試看看吧", (
+            "送出三次「你試看看吧」之後還是打成別的", learned.compositionString)
+
+        # 語言模型要真的載入了；否則上面所有整句選字的結果都只是沒有模型的舊算法，
+        # 跟模型有關的檢查一條都沒驗到。
+        lm_service = PinnedBopomofoTextService(DummyClient())
+        assert lm_service.language_model is not None, "雙詞語言模型沒有載入"
+        # 「是」比「試」常見 35 倍，但「了」接在「是」後面罕見、接在「試」後面常見。
+        # 沒有模型時是「我是了一下」。
+        sequence = type_readings(lm_service, ["ㄨㄛˇ", "ㄕˋ", "ㄌㄜ˙", "ㄧˊ", "ㄒㄧㄚˋ"], sequence)
+        assert lm_service.compositionString == "我試了一下", lm_service.compositionString
+        # 模型的詞頻不分讀音：「說」的頻率幾乎都屬於 ㄕㄨㄛ，在 ㄕㄨㄟˋ 只佔 1%。
+        # 沒有按讀音分配時「我睡」變成「我說」、「我快」變成「我會」。全讀音稽核
+        # 看不到這件事——它只看單一讀音的候選，單打一個音根本不經過整句選字。
+        for readings, expected in (
+            (["ㄨㄛˇ", "ㄕㄨㄟˋ"], "我睡"),
+            (["ㄨㄛˇ", "ㄎㄨㄞˋ"], "我快"),
+        ):
+            polyphone = PinnedBopomofoTextService(DummyClient())
+            sequence = type_readings(polyphone, readings, sequence)
+            assert polyphone.compositionString == expected, (
+                "破音字的模型詞頻沒有按讀音分配", expected, polyphone.compositionString)
 
     print("PASS: editable buffer, phrase index, learning, and quiet errors")
 

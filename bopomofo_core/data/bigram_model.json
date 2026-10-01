@@ -1,0 +1,15 @@
+{
+  "source": "https://codeberg.org/chewing/libchewing-data",
+  "source_path": "dict/chewing_v4/bigram_p50.arpa",
+  "source_commit": "40acb515b420eb0eaeb0186db1113a72cc9f4e94",
+  "source_sha256": "ce25ad7e282cfc710f61eea20ba666b3116ffc37de02f92e2df889fbeb811ee5",
+  "license": "CC-BY-4.0",
+  "attribution": "Chewing Chinese Bigram Language Model, libchewing-data (Chewing Project)",
+  "modifications": "Converted from ARPA to a compact binary table; log10 probabilities rounded to 0.001. No entries added or removed.",
+  "words": 111601,
+  "bigrams": 7109312,
+  "lambda": 0.6,
+  "oov_offset": -21.2457,
+  "oov_offset_samples": 112528,
+  "generator": "tools/build_bigram_model.py"
+}
