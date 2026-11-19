@@ -9,8 +9,9 @@
 
 ## 下載與安裝
 
-1. 到 [Releases](https://github.com/sakiwatashi/keyinput123/releases/latest) 下載
-   `Smart-Priority-Bopomofo-Setup-0.8.4.exe`（頁面上的 `SHA256SUMS.txt` 可用來核對檔案）。
+1. 下載 [Smart-Priority-Bopomofo-Setup-0.8.4.exe](https://github.com/sakiwatashi/keyinput123/releases/download/v0.8.4/Smart-Priority-Bopomofo-Setup-0.8.4.exe)
+   （或到 [Releases](https://github.com/sakiwatashi/keyinput123/releases/latest) 頁面，
+   `SHA256SUMS.txt` 可用來核對檔案）。
 2. 執行安裝程式，允許系統管理員權限。Windows 若跳出 SmartScreen 警告，按
    「其他資訊 → 仍要執行」。
 3. 安裝完成就能用：它會排在繁體中文鍵盤清單第一位並設成預設輸入法，

@@ -119,10 +119,34 @@ jobs:
       - name: Build installer
         shell: powershell
         run: .\build_release.ps1
+      # Release 頁第一眼就要有 EXE 的直接下載連結；v0.8.4 以前的頁面是空白的，
+      # 使用者只看到一串 assets 不知道點哪個。版本號取自 tag（v0.8.5 → 0.8.5）。
+      # 用 pwsh 寫檔：Windows PowerShell 5.1 的 utf8 會加 BOM。
+      - name: Write release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart("v")
+          $exe = "Smart-Priority-Bopomofo-Setup-$ver.exe"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$exe"
+          @(
+            "## 下載"
+            ""
+            "**→ [$exe]($url)**（點了直接下載）"
+            ""
+            "1. 下載後執行，允許系統管理員權限。"
+            "2. Windows 若跳出 SmartScreen 警告，按「其他資訊 → 仍要執行」。"
+            "3. 裝好就能用，``Alt+Shift`` 切到繁體中文就是智慧優先注音。"
+            ""
+            "已經裝過舊版的，直接執行新版安裝程式即可，個人學習資料會保留。"
+            "``SHA256SUMS.txt`` 可用來核對檔案。使用說明見 [README](https://github.com/${{ github.repository }}#readme)。"
+          ) | Set-Content -Path release-notes.md -Encoding utf8NoBOM
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-notes.md
           files: |
             release/Smart-Priority-Bopomofo-Setup-0.8.4.exe
             release/SHA256SUMS.txt
