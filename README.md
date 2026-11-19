@@ -275,13 +275,13 @@ cd keyinput123
 
 ```powershell
 python -m unittest discover -s tests -v       # 核心單元測試
-.\tools\run_all_tests.ps1                      # 全部測試（含 CI 跑不到的）
+.\tools\run_all_tests.ps1                      # 全部測試（含按鍵行為）
 .\tools\run_all_tests.ps1 -SkipSlow            # 跳過全讀音稽核
 ```
 
-CI 只跑 64 位元的單元測試與 PowerShell 煙霧測試。真正驗到按鍵行為的兩支需要 PIME
-內建的 32 位元 Python 才能載入 libchewing —— 改完 `pinned_bopomofo_ime.py` 一定要在
-本機跑過：
+CI 的 `test` 工作跑單元測試與 PowerShell 煙霧測試；`keys` 工作用 32 位元 Python 加上
+`tools/fetch_pime_runtime.ps1` 抓下的 PIME 檔案，實際按鍵驗證轉接層並跑全讀音稽核。
+兩者都要過才會發佈。本機要個別跑按鍵測試時：
 
 ```powershell
 & 'C:\Program Files (x86)\PIME\python\python3\python.exe' .\tests\pime_adapter_smoke.py

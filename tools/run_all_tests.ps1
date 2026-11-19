@@ -54,11 +54,11 @@ foreach ($script in Get-ChildItem -LiteralPath (Join-Path $projectRoot "tests") 
     }.GetNewClosure()
 }
 
-Write-Host "`n== 需要 PIME 32 位元 Python 的（CI 跑不到）=="
+Write-Host "`n== 需要 PIME 32 位元 Python 的（CI 在 keys 工作另外跑）=="
 $pythonPath = Join-Path ${env:ProgramFiles(x86)} "PIME\python\python3\python.exe"
 if (-not (Test-Path -LiteralPath $pythonPath)) {
-    Write-Host "  找不到 $pythonPath —— 這幾支跳過了，CI 也不會跑，等於沒有人在守。" -ForegroundColor Yellow
-    $failures.Add("PIME 的 32 位元 Python 不存在，按鍵行為完全沒有被測到")
+    Write-Host "  找不到 $pythonPath —— 這幾支在本機跳過了，只剩 CI 的 keys 工作在守。" -ForegroundColor Yellow
+    $failures.Add("PIME 的 32 位元 Python 不存在，本機沒有測到按鍵行為")
 }
 else {
     Invoke-Step "build_pime_overlay.ps1（前置）" {

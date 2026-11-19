@@ -18,6 +18,15 @@
 主要檔案位置：
 
 - `pime_module/pinned_bopomofo_ime.py`：按鍵、游標、候選視窗及 PIME 行為。
+  2026-11-19 起拆成主模組加三個檔，方法原封不動搬過去，靠 mixin 組回同一個類別：
+  - `pime_module/ime_ranking.py`（`PhraseRankingMixin`）：詞網格、個人詞、詞頻、
+    整句修正，以及自動組字與候選視窗共用的 `_ranked_phrase_options`。
+  - `pime_module/ime_completion.py`（`CompletionMixin`）：自動完成提示與 Tab 接上。
+  - `pime_module/ime_types.py`：`BufferedSyllable`、`CandidateChoice`、`BOPOMOFO_TEXT`。
+  新增 `pime_module/ime_*.py` 會被 `build_pime_overlay.ps1` 自動帶進安裝包；
+  取別的檔名就要自己加進 overlay，否則 PIME 載入時 ImportError、輸入法整個消失。
+  `VK_*` 常數與 `CTRL_PUNCTUATION` 必須留在主模組：`tests/control_panel_smoke.ps1`
+  直接解析主模組原始碼比對控制台的標點表。
 - `bopomofo_core/libchewing_provider.py`：libchewing 候選、詞語上下文與保守的常用詞規則。
 - `bopomofo_core/pinned_store.py`：單一讀音的個人優先字。
 - `bopomofo_core/phrase_store.py`：使用者確認過的 2–12 字詞語。

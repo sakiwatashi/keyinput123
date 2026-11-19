@@ -29,6 +29,10 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\input_methods_init.p
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\__init__.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\ime.json") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "pime_module\pinned_bopomofo_ime.py") -Destination $moduleRoot -Force
+# 主模組拆出來的 mixin 與型別（ime_ranking、ime_completion、ime_types）。用萬用
+# 字元而不是逐一列名：漏複製一個，PIME 載入時就 ImportError，輸入法整個消失。
+Get-ChildItem -LiteralPath (Join-Path $projectRoot "pime_module") -Filter "ime_*.py" -File |
+    Copy-Item -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "feedback-report.ps1") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "prune_phrases.py") -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "list_hidden.py") -Destination $moduleRoot -Force
